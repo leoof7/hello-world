@@ -1,5 +1,5 @@
 /* Service worker: deixa o app abrir sem internet na barraca. */
-var CACHE = "sucos-milena-v1";
+var CACHE = "limonada-milena-v1";
 var ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function (e) {
