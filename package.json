@@ -1,0 +1,11 @@
+{
+  "name": "zero",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gestor financeiro pessoal que roda inteiro no aparelho. Sem servidor, sem conta, sem mensalidade.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "python3 -m http.server 8000"
+  }
+}
