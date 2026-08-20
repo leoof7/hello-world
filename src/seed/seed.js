@@ -26,7 +26,7 @@ export function seedDocument(todayISO = '2026-08-19') {
     incomeCents: 840000,
     minimumCostCents: 418000,
     emergencyTargetMonths: 6,
-    onboarding: { done: true, steps: { cartoes: true, dividas: true, fixos: true, tetos: true } },
+    // `demo` liga a faixa de aviso em todas as telas e o botão de sair daqui.
     demo: true,
   };
 

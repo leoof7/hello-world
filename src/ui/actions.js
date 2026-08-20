@@ -522,11 +522,46 @@ const ACOES = {
     ).then((r) => { if (r === 'cal') return ACOES.calendario(); });
   },
 
+  /**
+   * Limpar os dados sem destruir o cofre.
+   *
+   * É a saída do exemplo, e é diferente de "apagar tudo": a chave, a passkey e
+   * as doze palavras continuam valendo, então não há setup nenhum para refazer.
+   * Sem isso, sair dos dados de exemplo obrigava a apagar o cofre e passar de
+   * novo pelas doze palavras — que é exatamente o loop que não pode existir.
+   */
+  async limpar() {
+    const eraExemplo = !!app.doc.profile?.demo;
+    const ok = await confirmar({
+      titulo: eraExemplo ? 'Sair do exemplo' : 'Limpar os dados',
+      texto: eraExemplo
+        ? 'Apaga os lançamentos, cartões e dívidas fictícios e deixa o app pronto para os seus números. Suas doze palavras e o Face ID continuam os mesmos — você não vai refazer nada.'
+        : 'Apaga lançamentos, cartões, dívidas, cofrinhos e tetos. O cofre, o Face ID e as doze palavras continuam valendo. Não tem volta sem backup.',
+      ok: eraExemplo ? 'Limpar e começar' : 'Limpar tudo',
+      perigo: !eraExemplo,
+    });
+    if (!ok) return;
+
+    if (!eraExemplo) {
+      const confirma = await form('Confirmar',
+        'Digite LIMPAR para confirmar. Se você quer guardar o que está aqui, cancele e faça um backup antes.',
+        [{ name: 'palavra', label: 'Confirmação', type: 'text', placeholder: 'LIMPAR' }],
+        { ok: 'Limpar agora' });
+      if (confirma?.palavra !== 'LIMPAR') { toast('Nada foi limpo.'); return; }
+    }
+
+    const { documentoNovo } = await import('./app.js');
+    app.doc = await db.save(app.key, documentoNovo());
+    go('painel');
+    draw();
+    toast(eraExemplo ? 'Pronto. Agora é o seu app.' : 'Dados limpos.');
+  },
+
   async apagar() {
     const ok = await confirmar({
-      titulo: 'Apagar tudo',
-      texto: 'Apaga o cofre inteiro deste aparelho: lançamentos, cartões, dívidas e cofrinhos. Não existe cópia em servidor nenhum. Só o seu arquivo de backup pode trazer isso de volta.',
-      ok: 'Apagar tudo',
+      titulo: 'Apagar tudo, inclusive o cofre',
+      texto: 'Apaga o cofre inteiro deste aparelho e a chave junto: você vai refazer as doze palavras do começo. Se você só quer zerar os dados, use "Limpar os dados" — é mais simples e não refaz nada.',
+      ok: 'Apagar o cofre',
       perigo: true,
     });
     if (!ok) return;
@@ -553,6 +588,18 @@ async function editarLancamento(id, sugestao = {}) {
 
   if (tx?.installment) {
     toast('Parcela não se edita sozinha — apague a compra inteira e lance de novo.');
+    return;
+  }
+
+  // Todo lançamento sai de algum lugar. Sem conta nem cartão o formulário não
+  // teria "onde", e o campo vazio viraria erro na hora de salvar.
+  if (!opcoesOrigem().length) {
+    const ok = await confirmar({
+      titulo: 'Cadastre uma conta primeiro',
+      texto: 'Todo lançamento precisa dizer de onde saiu o dinheiro — uma conta ou um cartão. Leva meio minuto.',
+      ok: 'Criar conta',
+    });
+    if (ok) await editarConta(null);
     return;
   }
 

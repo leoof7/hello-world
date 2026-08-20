@@ -202,6 +202,151 @@ for (const tema of ['dark', 'light']) {
   await ctx.close();
 }
 
+// ----------------------------------------------- começar do zero e sair do exemplo
+//
+// Estes três casos existem porque falharam de verdade: o app abria com os dados
+// de exemplo e a única saída passava por apagar o cofre e refazer as doze
+// palavras — que devolvia a pessoa ao começo, em círculo.
+
+/** Faz o cadastro inicial até a escolha do conteúdo. Devolve a página. */
+async function novoAparelho(escolha) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => console.log('  pageerror:', e.message));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#anotei', { timeout: 20000 });
+  const palavras = await page.$$eval('.word .w', (els) => els.map((e) => e.textContent.trim()));
+  await page.click('#anotei');
+  await page.waitForSelector('#conf');
+  const pos = await page.$$eval('input[data-p]', (els) => els.map((e) => Number(e.dataset.p)));
+  for (const p of pos) await page.fill(`input[data-p="${p}"]`, palavras[p]);
+  await page.click('#conf');
+  await page.waitForSelector('#pw', { timeout: 20000 });
+  await page.fill('#pw', SENHA);
+  await page.click('#ok');
+  await page.waitForSelector(`#${escolha}`, { timeout: 20000 });
+  await page.click(`#${escolha}`);
+  await page.waitForSelector('.tabbar', { timeout: 20000 });
+  return { ctx, page };
+}
+
+const documento = (page) => page.evaluate(async () => {
+  const { app } = await import('./src/ui/app.js');
+  return {
+    tx: app.doc.transactions.length,
+    cartoes: app.doc.cards.length,
+    dividas: app.doc.debts.length,
+    categorias: app.doc.categories.length,
+    demo: !!app.doc.profile.demo,
+  };
+});
+
+const guia = async (page) => {
+  await page.evaluate(() => { location.hash = '#guia'; });
+  await page.waitForTimeout(350);
+  const t = await page.evaluate(() => document.body.innerText);
+  await page.evaluate(() => { location.hash = '#painel'; });
+  await page.waitForTimeout(250);
+  return (t.match(/(\d) de (\d) feitas/) || []).slice(1).join('/');
+};
+
+{
+  console.log('\ncomeçar do zero');
+  const { ctx, page } = await novoAparelho('vazio');
+  const d = await documento(page);
+  ok('o app começa sem nenhum dado', d.tx === 0 && d.cartoes === 0 && d.dividas === 0);
+  ok('mas já vem com as categorias', d.categorias > 0, `${d.categorias} categorias`);
+  ok('sem faixa de exemplo', !(await page.$('.demo')));
+  ok('o guia começa em 0 de 7', (await guia(page)) === '0/7');
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
+{
+  console.log('\nsair do exemplo sem refazer nada');
+  const { ctx, page } = await novoAparelho('exemplo');
+  ok('o exemplo se declara exemplo em todas as telas', !!(await page.$('.demo')));
+  ok('o guia reflete o exemplo preenchido', (await guia(page)) === '6/7');
+
+  await page.click('.demo');
+  await page.waitForSelector('.sheet');
+  await page.click('.sheet .btn.primary');
+  await page.waitForTimeout(900);
+
+  const limpo = await documento(page);
+  ok('limpar zera os dados', limpo.tx === 0 && limpo.cartoes === 0 && limpo.dividas === 0);
+  ok('e mantém as categorias', limpo.categorias > 0);
+  ok('a faixa de exemplo some', !(await page.$('.demo')));
+  ok('o guia volta para 0 de 7', (await guia(page)) === '0/7');
+  ok('o Painel vazio convida a começar em vez de mostrar R$ 0',
+    await page.evaluate(() => document.body.innerText.includes('Seu app está vazio')));
+
+  // o dado novo tem de sobreviver ao recarregamento, e sem refazer o cofre
+  await page.click('[data-act="novo-cartao"]');
+  await page.waitForSelector('.sheet #frm');
+  await page.fill('.sheet [name="name"]', 'Meu Nubank');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(600);
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#pw, #anotei', { timeout: 20000 });
+  ok('recarregar NÃO pede as doze palavras de novo', !(await page.$('#anotei')));
+  await page.fill('#pw', SENHA);
+  await page.click('#ok');
+  await page.waitForSelector('.tabbar', { timeout: 20000 });
+  const depois = await documento(page);
+  ok('o que você cadastrou sobrevive ao recarregamento',
+    depois.cartoes === 1 && depois.demo === false);
+
+  // Lançar sem conta nem cartão não pode estourar: tem de explicar e oferecer o passo.
+  // Uma dívida cadastrada basta para o Painel sair do estado vazio sem criar origem.
+  await page.evaluate(async () => {
+    const { commit } = await import('./src/ui/app.js');
+    await commit((d) => {
+      d.cards = [];
+      d.accounts = [];
+      d.debts = [{ id: 'dv1', name: 'Teste', kind: 'overdraft', balanceCents: 100000, monthlyRate: 0.08 }];
+    });
+  });
+  await page.evaluate(() => { location.hash = '#painel'; });
+  await page.waitForTimeout(400);
+  await page.click('[data-act="novo"]');
+  await page.waitForTimeout(500);
+  ok('lançar sem conta explica em vez de quebrar',
+    await page.evaluate(() => document.body.innerText.includes('Cadastre uma conta primeiro')));
+  await page.click('.sheet [data-a="no"]');
+  await page.waitForTimeout(200);
+
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
+{
+  console.log('\nsocorro: erro de desbloqueio nunca é beco sem saída');
+  const { ctx, page } = await novoAparelho('exemplo');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#pw', { timeout: 20000 });
+  await page.fill('#pw', 'senha-que-nao-e-a-certa');
+  await page.click('#ok');
+  await page.waitForSelector('#zerar', { timeout: 20000 });
+
+  const botoes = await page.$$eval('.lock .btn', (els) => els.map((e) => e.textContent.trim()));
+  ok('a tela de socorro aparece com saídas', botoes.length >= 2, botoes.join(' · '));
+  ok('oferece tentar de novo o método certo', botoes.some((b) => /senha/i.test(b)), botoes.join(' · '));
+  ok('não oferece Face ID num cofre de senha', !botoes.some((b) => /face id/i.test(b)));
+  ok('oferece apagar e restaurar', botoes.some((b) => /restaurar/i.test(b)));
+
+  await page.click('#senha');
+  await page.waitForSelector('#pw');
+  await page.fill('#pw', SENHA);
+  await page.click('#ok');
+  await page.waitForSelector('.tabbar', { timeout: 20000 });
+  ok('a senha certa no socorro abre o cofre', (await documento(page)).tx > 0);
+
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
 await browser.close();
 
 console.log(falhas ? `\n${falhas} verificações falharam` : '\ntudo passou');

@@ -39,6 +39,23 @@ endereço definitivo antes de começar a digitar dados de verdade.
 
 ---
 
+## A primeira vez
+
+Depois das doze palavras, o app pergunta por onde começar:
+
+- **Começar do zero com os meus dados** — o app abre vazio, com o Painel virado
+  para o primeiro passo. É o caminho normal.
+- **Só espiar o exemplo primeiro** — carrega um cenário fictício para você ver as
+  telas funcionando. Enquanto ele estiver ligado, uma faixa amarela aparece em
+  **todas** as telas dizendo que os números não são seus; um toque nela limpa
+  tudo e devolve o app vazio.
+- **Restaurar de um backup** — para quando você trocou de celular.
+
+Sair do exemplo (ou zerar os dados depois) **não** mexe no cofre: suas doze
+palavras e o Face ID continuam os mesmos e você não refaz nada. Isso fica em
+*Tudo → Limpar os dados*. Só *Apagar tudo, inclusive o cofre* recomeça a
+configuração do princípio.
+
 ## Como abrir e como recuperar
 
 Na primeira vez o app entrega **doze palavras**. Escreva no papel. Foto na
@@ -51,6 +68,12 @@ galeria não conta.
   senha", não há suporte.
 - Sem Face ID disponível, o app cai para **senha** derivada com PBKDF2-SHA256,
   600 mil iterações.
+
+Se o desbloqueio falhar, o app **não** termina em "recarregue e torça": aparece
+uma tela de socorro com as saídas que existem de verdade para o seu caso —
+tentar de novo, o caminho alternativo quando ele existe, ou apagar e restaurar o
+backup. Com a chave dentro da passkey, a tela diz com todas as letras que as
+doze palavras abrem o *arquivo de backup*, não o cofre deste aparelho.
 
 O banco inteiro é um único documento cifrado com **AES-256-GCM**. Documento
 único, e não registro a registro, porque índice de IndexedDB é texto puro — com

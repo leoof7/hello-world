@@ -19,6 +19,7 @@ import { generatePhrase, phraseToBytes, challengePositions, normalize } from '..
 import { backupStatus } from '../data/backup.js';
 import { emptyDocument } from '../data/migrations.js';
 import { seedDocument } from '../seed/seed.js';
+import { CATEGORIES } from '../seed/categories.js';
 import { derive } from './state.js';
 import { render } from './screens.js';
 import { esc, icon, toast, sheet, $ } from './dom.js';
@@ -107,9 +108,17 @@ async function primeiraVez() {
   await primeiroConteudo();
 }
 
-/** Confirma três palavras sorteadas — chato de propósito. */
+/**
+ * Confirma três palavras sorteadas — chato de propósito.
+ *
+ * O que a pessoa digitou é preservado entre as tentativas e só o campo errado
+ * fica marcado. Zerar os três campos por causa de uma letra é o tipo de
+ * detalhe que faz alguém desistir do app na primeira tela.
+ */
 async function confirmarPalavras(phrase) {
   const posicoes = challengePositions(3);
+  const digitado = {};
+  let errados = [];
 
   while (true) {
     lockScreen(`
@@ -119,8 +128,10 @@ async function confirmarPalavras(phrase) {
       <div style="width:100%;max-width:340px;margin-top:20px">
         ${posicoes.map((p) => `
           <div class="field">
-            <label>Palavra ${p + 1}</label>
-            <input type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" data-p="${p}">
+            <label>Palavra ${p + 1}${errados.includes(p) ? ' · não confere' : ''}</label>
+            <input type="text" inputmode="text" autocapitalize="off" autocorrect="off"
+                   spellcheck="false" data-p="${p}" value="${esc(digitado[p] || '')}"
+                   ${errados.includes(p) ? 'style="border-color:var(--red)"' : ''}>
           </div>`).join('')}
         <div class="btns">
           <button class="btn primary" id="conf">Confirmar</button>
@@ -129,9 +140,15 @@ async function confirmarPalavras(phrase) {
       </div>
     `);
 
+    const guardar = () => {
+      for (const p of posicoes) {
+        digitado[p] = document.querySelector(`input[data-p="${p}"]`)?.value || '';
+      }
+    };
+
     const acao = await new Promise((r) => {
-      $('#conf').onclick = () => r('conf');
-      $('#ver').onclick = () => r('ver');
+      $('#conf').onclick = () => { guardar(); r('conf'); };
+      $('#ver').onclick = () => { guardar(); r('ver'); };
     });
 
     if (acao === 'ver') {
@@ -146,13 +163,14 @@ async function confirmarPalavras(phrase) {
       continue;
     }
 
-    const certo = posicoes.every((p) => {
-      const campo = document.querySelector(`input[data-p="${p}"]`);
-      return normalize(campo?.value || '') === phrase[p];
-    });
+    const faltando = posicoes.filter((p) => !(digitado[p] || '').trim());
+    // Marcar de vermelho um campo que a pessoa nem chegou a preencher é ruído.
+    errados = posicoes.filter((p) => (digitado[p] || '').trim() && normalize(digitado[p]) !== phrase[p]);
 
-    if (certo) return;
-    toast('Alguma palavra não bate. Confira a ordem e a grafia.');
+    if (!faltando.length && !errados.length) return;
+    toast(faltando.length && !errados.length
+      ? 'Preencha as três.'
+      : errados.length === 1 ? 'Uma palavra não bate.' : `${errados.length} palavras não batem.`);
   }
 }
 
@@ -223,8 +241,10 @@ async function destravar(meta) {
     `);
     await new Promise((r) => { $('#faceid').onclick = r; });
     boot('abrindo…');
-    const segredo = await prfSecret(meta.credentialId);
-    if (!segredo) throw new Error('Face ID não devolveu a chave.');
+    const segredo = await prfSecret(meta.credentialId).catch(() => null);
+    // Sem escapatória aqui, o app vira um beco sem saída: o erro leva a
+    // recarregar, e recarregar leva ao mesmo erro. Por isso o socorro.
+    if (!segredo) return socorro(meta, 'O Face ID não devolveu a chave deste aparelho.');
     return deriveKeyFromSecret(segredo, salt);
   }
 
@@ -238,13 +258,92 @@ async function destravar(meta) {
          guarda a chave dentro da credencial.</p>
     `);
     await new Promise((r) => { $('#faceid').onclick = r; });
-    await prfSecret(meta.credentialId); // só para exigir o Face ID
+    await prfSecret(meta.credentialId).catch(() => null); // só para exigir o Face ID
     const frase = await pedirFrase();
     return deriveKeyFromSecret(phraseToBytes(frase), salt);
   }
 
   const senha = await pedirSenha();
   return deriveKeyFromPassword(senha, salt);
+}
+
+/**
+ * Tela de socorro. Nenhum erro de desbloqueio pode terminar em "recarregue e
+ * torça" — recarregar leva ao mesmo erro, e é assim que um app trava a pessoa
+ * do lado de fora dos próprios dados.
+ *
+ * O que ela oferece depende de COMO o cofre foi trancado, e o texto não mente
+ * sobre isso: com chave dentro da passkey, as doze palavras abrem o arquivo de
+ * backup, não o cofre deste aparelho.
+ */
+async function socorro(meta, mensagem) {
+  const salt = b64ToBytes(meta.salt);
+  const porFrase = meta.unlockMethod === 'passkey-frase';
+  const porSenha = meta.unlockMethod === 'senha';
+  const temFaceId = !porSenha && !!meta.credentialId;
+
+  while (true) {
+    lockScreen(`
+      <div class="boot-mark">Zero<i></i></div>
+      <p class="ser">${esc(mensagem)}</p>
+      <p class="why">${porSenha
+        ? 'A senha é a única coisa que abre este cofre. Se você não lembra, o caminho é apagar e restaurar o seu backup com as doze palavras.'
+        : porFrase
+          ? 'Você ainda pode abrir este cofre com as doze palavras.'
+          : 'Neste aparelho a chave mora dentro da passkey, então as doze palavras não abrem este cofre — elas abrem o seu <b>arquivo de backup</b>. Se o Face ID não voltar, o caminho é apagar e restaurar o backup.'}</p>
+      <div class="btns" style="width:100%;max-width:340px;flex-direction:column">
+        ${temFaceId ? '<button class="btn primary" id="denovo">Tentar o Face ID de novo</button>' : ''}
+        ${porSenha ? '<button class="btn primary" id="senha">Tentar a senha de novo</button>' : ''}
+        ${porFrase ? '<button class="btn ghost" id="frase">Abrir com as doze palavras</button>' : ''}
+        <button class="btn danger" id="zerar">Apagar e restaurar de um backup</button>
+      </div>
+    `);
+
+    const acao = await new Promise((r) => {
+      $('#denovo') && ($('#denovo').onclick = () => r('denovo'));
+      $('#frase') && ($('#frase').onclick = () => r('frase'));
+      $('#senha') && ($('#senha').onclick = () => r('senha'));
+      $('#zerar').onclick = () => r('zerar');
+    });
+
+    try {
+      if (acao === 'denovo') {
+        const segredo = await prfSecret(meta.credentialId).catch(() => null);
+        if (segredo) return deriveKeyFromSecret(segredo, salt);
+        mensagem = 'O Face ID continua sem devolver a chave.';
+        continue;
+      }
+      if (acao === 'frase') {
+        return deriveKeyFromSecret(phraseToBytes(await pedirFrase()), salt);
+      }
+      if (acao === 'senha') {
+        return deriveKeyFromPassword(await pedirSenha(), salt);
+      }
+      if (acao === 'zerar') {
+        lockScreen(`
+          <div class="boot-mark">Zero<i></i></div>
+          <p class="ser">Isto apaga o cofre deste aparelho.</p>
+          <p class="why">Só faça se você tiver o arquivo de backup e as doze palavras.
+             Sem eles, o que está aqui dentro não volta — não existe cópia em servidor
+             nenhum. Depois de apagar, o app recomeça e oferece restaurar o backup.</p>
+          <div class="btns" style="width:100%;max-width:340px;flex-direction:column">
+            <button class="btn danger" id="sim">Tenho o backup, pode apagar</button>
+            <button class="btn ghost" id="nao">Voltar</button>
+          </div>
+        `);
+        const confirmou = await new Promise((r) => {
+          $('#sim').onclick = () => r(true);
+          $('#nao').onclick = () => r(false);
+        });
+        if (!confirmou) { mensagem = 'Nada foi apagado.'; continue; }
+        await db.wipe();
+        location.reload();
+        return new Promise(() => {}); // a página está indo embora
+      }
+    } catch (e) {
+      mensagem = e.message || 'Não deu certo.';
+    }
+  }
 }
 
 function pedirFrase() {
@@ -273,29 +372,82 @@ function pedirFrase() {
 async function primeiroConteudo() {
   lockScreen(`
     <div class="boot-mark">Zero<i></i></div>
-    <p class="ser">Quer ver o app funcionando antes de digitar os seus números?</p>
-    <p class="why">O exemplo é um cenário fictício — fatura atrasada, cheque especial e
-       parcelas correndo. Dá para apagar tudo depois com um toque.</p>
+    <p class="ser">Por onde você quer começar?</p>
+    <p class="why">O app é seu e começa vazio. O exemplo existe só para você ver as
+       telas funcionando — é um cenário <b>fictício</b>, fica marcado como exemplo em
+       todas as telas e sai com um toque quando você quiser.</p>
     <div class="btns" style="width:100%;max-width:340px;flex-direction:column">
-      <button class="btn primary" id="exemplo">Ver com o exemplo</button>
-      <button class="btn ghost" id="vazio">Começar do zero</button>
+      <button class="btn primary" id="vazio">Começar do zero com os meus dados</button>
+      <button class="btn ghost" id="exemplo">Só espiar o exemplo primeiro</button>
+      <button class="btn ghost" id="backup">Restaurar de um backup</button>
     </div>
   `);
 
   const escolha = await new Promise((r) => {
-    $('#exemplo').onclick = () => r('exemplo');
     $('#vazio').onclick = () => r('vazio');
+    $('#exemplo').onclick = () => r('exemplo');
+    $('#backup').onclick = () => r('backup');
   });
 
   if (escolha === 'exemplo') {
     app.doc = seedDocument(app.todayISO);
-  } else {
-    const base = emptyDocument();
-    const { CATEGORIES } = await import('../seed/categories.js');
-    base.categories = CATEGORIES.map((c) => ({ ...c }));
-    app.doc = base;
+    app.doc = await db.save(app.key, app.doc);
+    return;
   }
-  app.doc = await db.save(app.key, app.doc);
+
+  if (escolha === 'backup') {
+    const restaurado = await restaurarNoArranque();
+    if (restaurado) { app.doc = await db.save(app.key, restaurado); return; }
+    // deu errado ou desistiu: começa vazio, e o backup continua disponível em Tudo
+  }
+
+  app.doc = await db.save(app.key, documentoNovo());
+}
+
+/** Documento em branco, já com as categorias — sem elas não há como classificar nada. */
+export function documentoNovo() {
+  const base = emptyDocument();
+  base.categories = CATEGORIES.map((c) => ({ ...c }));
+  return base;
+}
+
+/** Restaurar backup antes mesmo de entrar no app — o caso "troquei de celular". */
+async function restaurarNoArranque() {
+  const { readBackup, readFile } = await import('../data/backup.js');
+
+  lockScreen(`
+    <div class="boot-mark">Zero<i></i></div>
+    <p class="ser">Escolha o arquivo de backup.</p>
+    <p class="why">É o arquivo <b>.zbk</b> que você salvou no iCloud Drive ou nos Arquivos.
+       Depois dele, as doze palavras do aparelho antigo.</p>
+    <div class="btns" style="width:100%;max-width:340px;flex-direction:column">
+      <button class="btn primary" id="arq">Escolher arquivo</button>
+      <button class="btn ghost" id="pular">Agora não</button>
+    </div>
+  `);
+
+  const arquivo = await new Promise((resolve) => {
+    $('#pular').onclick = () => resolve(null);
+    $('#arq').onclick = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.zbk,application/json';
+      input.onchange = async () => {
+        const f = input.files?.[0];
+        resolve(f ? await readFile(f) : null);
+      };
+      input.click();
+    };
+  });
+  if (!arquivo) return null;
+
+  try {
+    const frase = await pedirFrase();
+    return await readBackup(arquivo, frase);
+  } catch (e) {
+    toast(e.message || 'Não consegui abrir esse backup.');
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------- arranque
@@ -315,14 +467,31 @@ async function main() {
       app.doc = await db.load(app.key);
     }
   } catch (e) {
-    lockScreen(`
-      <div class="boot-mark">Zero<i></i></div>
-      <p class="ser">Não consegui abrir o cofre.</p>
-      <p class="why">${esc(e.message || 'erro desconhecido')}</p>
-      <div class="btns" style="width:100%;max-width:340px"><button class="btn primary" id="rec">Tentar de novo</button></div>
-    `);
-    $('#rec').onclick = () => location.reload();
-    return;
+    const meta = await db.readMeta().catch(() => null);
+    if (!meta?.salt) {
+      // Nem meta existe: não há cofre para socorrer, só recomeçar.
+      lockScreen(`
+        <div class="boot-mark">Zero<i></i></div>
+        <p class="ser">Não consegui iniciar o app.</p>
+        <p class="why">${esc(e.message || 'erro desconhecido')}</p>
+        <div class="btns" style="width:100%;max-width:340px"><button class="btn primary" id="rec">Tentar de novo</button></div>
+      `);
+      $('#rec').onclick = () => location.reload();
+      return;
+    }
+    try {
+      app.key = await socorro(meta, e.message || 'Não consegui abrir o cofre.');
+      app.doc = await db.load(app.key);
+    } catch (e2) {
+      lockScreen(`
+        <div class="boot-mark">Zero<i></i></div>
+        <p class="ser">Não consegui abrir o cofre.</p>
+        <p class="why">${esc(e2.message || 'erro desconhecido')}</p>
+        <div class="btns" style="width:100%;max-width:340px"><button class="btn primary" id="rec">Recomeçar</button></div>
+      `);
+      $('#rec').onclick = () => location.reload();
+      return;
+    }
   }
 
   // tema salvo

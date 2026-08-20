@@ -34,10 +34,24 @@ export function render(app) {
   esconder = app.privacy;
   const tela = TELAS[app.screen] || TELAS.painel;
   document.getElementById('app').innerHTML = `
+    ${faixaExemplo(app)}
     <div class="screens"><section class="screen active">${tela(app)}</section></div>
     ${tabbar(app.screen)}
   `;
   wire(app);
+}
+
+/**
+ * Faixa fixa enquanto o app está com os dados de exemplo.
+ *
+ * Fica em todas as telas de propósito: sem ela, dá para passar dias achando que
+ * aqueles números são seus, e a saída ficava escondida em Tudo.
+ */
+function faixaExemplo(app) {
+  if (!app.doc?.profile?.demo) return '';
+  return `<button class="demo" data-act="limpar">
+    <b>Dados de exemplo</b><span>Estes números são fictícios · toque para limpar e começar do zero</span>
+  </button>`;
 }
 
 function tabbar(atual) {
@@ -75,6 +89,10 @@ function painel(app) {
   const v = app.view;
   const temDivida = v.dividaTotalCents > 0;
 
+  // App recém-criado: um "R$ 0" gigante não informa nada e ainda parece defeito.
+  // Enquanto não há um número de verdade, o herói vira o primeiro passo.
+  if (v.vazio) return painelVazio(app);
+
   const hero = temDivida
     ? `<div class="hero">
         <div class="top"><span class="lbl">Falta para você sair</span></div>
@@ -102,7 +120,8 @@ function painel(app) {
       </button>`
     : '';
 
-  const backup = app.backup?.due
+  // Cobrar backup de quem ainda não digitou nada é barulho: não há o que salvar.
+  const backup = app.backup?.due && !v.vazio
     ? `<button class="nudge ${app.backup.severity === 'alta' ? 'crit' : ''}" data-act="backup">
         <span class="ic">${icon('download')}</span>
         <div><b>Hora do backup</b><i>${esc(backupMessage(app.backup))}</i></div>
@@ -158,6 +177,72 @@ function painel(app) {
       ? `<div class="list">${v.lancamentos.slice(0, 8).map((t) => linha(t, v)).join('')}</div>`
       : `<div class="empty">Nada lançado ainda.<br>Toque em <b>Lançar</b> para começar.</div>`}
   </div>
+  `;
+}
+
+const ICONE_DA_TELA = {
+  cartoes: 'cartao', dividas: 'escudo', analise: 'grafico',
+  tudo: 'menu', cofrinhos: 'cofre', recebimentos: 'dinheiro',
+};
+
+/**
+ * O Painel de um app que ainda não tem dado nenhum.
+ *
+ * Aqui não existe número para mostrar, então o lugar do número é o caminho:
+ * qual é o próximo passo, onde ele fica e por que ele importa. Cobrar backup
+ * de quem ainda não digitou nada seria só barulho.
+ */
+function painelVazio(app) {
+  const v = app.view;
+  const proximo = v.guia.pendentes[0];
+
+  return `
+  ${header(app)}
+
+  <div class="hero">
+    <div class="top"><span class="lbl">Bem-vindo</span></div>
+    <div class="big ser" style="font-size:clamp(26px,7.6vw,32px);line-height:1.25">Seu app está vazio<br>— e é assim mesmo.</div>
+    <div class="foot"><span class="acc">nada aqui sai deste aparelho · ${v.guia.total} passos, uns 10 minutos</span></div>
+  </div>
+
+  ${proximo ? `
+  <button class="nudge" data-go="${proximo.go}">
+    <span class="ic">${icon(ICONE_DA_TELA[proximo.go] || 'ajuda')}</span>
+    <div><b>Comece por: ${esc(proximo.label)}</b><i>${esc(proximo.where)} · ${esc(proximo.hint)}</i></div>
+    <span class="arr">${icon('seta')}</span>
+  </button>` : ''}
+
+  <div class="quick">
+    <button class="qa" data-act="novo-cartao"><div class="ic">${icon('cartao')}</div><span>Cartão</span></button>
+    <button class="qa" data-act="nova-divida"><div class="ic">${icon('escudo')}</div><span>Dívida</span></button>
+    <button class="qa" data-act="nova-renda"><div class="ic">${icon('dinheiro')}</div><span>Salário</span></button>
+    <button class="qa" data-act="importar"><div class="ic">${icon('upload')}</div><span>Importar</span></button>
+  </div>
+
+  <div class="sec"><div class="say">
+    <div class="k eb" style="color:var(--jade)">Por onde começar</div>
+    <div class="q ser">Cadastre os cartões primeiro. O resto se encaixa neles.</div>
+    <div class="p">O dia do fechamento é o que decide em qual fatura cada compra cai — e é
+      isso que faz a projeção acertar. Depois vêm as dívidas com as taxas, o salário
+      e os gastos fixos. Aí o app já consegue te dizer alguma coisa útil.</div>
+  </div></div>
+
+  <div class="sec">
+    <div class="sh"><h3>Os ${v.guia.total} passos</h3><a data-go="guia">Ver o guia</a></div>
+    <div class="list">
+      ${v.guia.passos.map((p) => `
+        <button class="row" data-go="${p.go}">
+          <div class="ic">${icon(p.done ? 'check' : 'lista')}</div>
+          <div class="bd"><div class="t">${esc(p.label)}</div><div class="s">${esc(p.where)}</div></div>
+          <span class="arr">${icon('seta')}</span>
+        </button>`).join('')}
+    </div>
+  </div>
+
+  <p class="empty" style="font-size:11.5px;padding:22px 6px 0;text-align:left;line-height:1.65">
+    Já usa outro app? <b data-act="importar" style="color:var(--jade);cursor:pointer">Importe o extrato</b>
+    em CSV ou OFX e o Zero classifica quase tudo sozinho.
+  </p>
   `;
 }
 
@@ -721,7 +806,9 @@ function tudo(app) {
     <div class="list">
       ${item('perfil', 'engrenagem', 'Seu nome e renda', esc(app.doc.profile.name || 'não preenchido'))}
       ${item('tema', 'lua', 'Tema', app.doc.settings.theme === 'auto' ? 'segue o sistema' : app.doc.settings.theme === 'dark' ? 'escuro' : 'claro')}
-      ${item('apagar', 'x', 'Apagar tudo deste aparelho', 'não tem volta e não tem cópia no servidor', 'r')}
+      ${item('limpar', 'lista', app.doc.profile?.demo ? 'Sair do exemplo e começar do zero' : 'Limpar os dados',
+        'zera os lançamentos e mantém suas doze palavras', 'a')}
+      ${item('apagar', 'x', 'Apagar tudo, inclusive o cofre', 'refaz as doze palavras do começo', 'r')}
     </div>
   </div>
 

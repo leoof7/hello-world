@@ -122,9 +122,15 @@ export function derive(doc, todayISO = today()) {
   const picoCents = Math.max(doc.profile?.debtPeakCents || 0, dividaTotalCents);
   const progresso = picoCents > 0 ? 1 - dividaTotalCents / picoCents : 0;
 
+  // Um app sem nada dentro não tem número para mostrar — quem desenha decide o
+  // que fazer com isso, mas quem decide se está vazio é aqui.
+  const vazio = !doc.transactions.length && !doc.cards.length
+    && !doc.debts.length && !(doc.recurring || []).length;
+
   return {
     todayISO,
     mes,
+    vazio,
     doc,
     catById,
     categorias,
