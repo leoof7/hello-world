@@ -15,7 +15,7 @@
 const BASE = process.env.BASE || 'http://localhost:8000/index.html';
 const PW = process.env.PW || 'playwright';
 const SENHA = 'senha-de-teste-123';
-const TELAS = ['painel', 'cartoes', 'dividas', 'analise', 'tudo', 'cofrinhos', 'recebimentos', 'revisao', 'guia'];
+const TELAS = ['painel', 'cartoes', 'dividas', 'analise', 'tudo', 'cofrinhos', 'recebimentos', 'revisao', 'guia', 'investimentos', 'faturas'];
 
 const { chromium } = await import(PW).then((m) => m.default || m);
 
@@ -444,8 +444,8 @@ const guia = async (page) => {
 
   await page.evaluate(() => { location.hash = '#analise'; });
   await page.waitForTimeout(600);
-  ok('e a Análise avisa que teto em categoria fixa não funciona',
-    await page.evaluate(() => document.body.innerText.includes('gasto fixo')));
+  ok('e a Saúde tira Moradia da lista de tetos e mostra como gasto fixo',
+    await page.evaluate(() => document.body.innerText.includes('Gastos fixos')));
 
   await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
   await ctx.close();

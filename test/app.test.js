@@ -339,10 +339,12 @@ test('projeção de quem só tem salário não fica em milhões negativos', () =
   assert.ok(menor > -1000000, `o pior dia da projeção deu ${(menor / 100).toFixed(2)}`);
 });
 
-test('teto em categoria fixa é sinalizado para a tela avisar', () => {
+test('categoria fixa sai dos tetos e vira gasto fixo informativo', () => {
   const doc = seedDocument(HOJE);
-  doc.budgets = { ...doc.budgets, moradia: 90000 };  // moradia é fixed:true
+  doc.budgets = { ...doc.budgets, moradia: 90000, mercado: 80000 };  // moradia é fixed:true, mercado não
   const v = derive(doc, HOJE);
-  assert.ok(v.tetoEmFixa.some((c) => c.id === 'moradia'));
-  assert.ok(!v.tetoEmFixa.some((c) => c.id === 'mercado'), 'mercado varia, não entra no aviso');
+  assert.ok(!v.orcamentoVariavel.some((c) => c.id === 'moradia'), 'moradia não vira barra de teto');
+  assert.ok(v.orcamentoVariavel.some((c) => c.id === 'mercado'), 'mercado varia, continua com teto');
+  assert.ok(v.categoriasFixas.some((c) => c.id === 'moradia'), 'moradia aparece na lista de gastos fixos');
+  assert.ok(!v.categoriasFixas.some((c) => c.id === 'mercado'), 'mercado não é gasto fixo');
 });

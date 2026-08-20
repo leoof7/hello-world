@@ -38,8 +38,8 @@ export const app = {
   pediuAtualizar: false, // a pessoa tocou em "instalar": pode recarregar
 };
 
-const TELAS = ['painel', 'cartoes', 'dividas', 'analise', 'tudo', 'cofrinhos', 'recebimentos', 'revisao', 'guia', 'faturas'];
-const PAI = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel' };
+const TELAS = ['painel', 'cartoes', 'dividas', 'analise', 'tudo', 'cofrinhos', 'recebimentos', 'revisao', 'guia', 'faturas', 'investimentos'];
+const PAI = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel', dividas: 'tudo' };
 
 // ------------------------------------------------------------------ persistir
 

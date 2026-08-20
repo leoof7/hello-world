@@ -13,16 +13,16 @@ import { wire } from './actions.js';
 
 const TABS = [
   ['painel', 'casa', 'Painel'],
-  ['cartoes', 'cartao', 'Cartões'],
-  ['dividas', 'escudoOk', 'Dívidas'],
+  ['cartoes', 'cartao', 'Finanças'],
+  ['investimentos', 'cofre', 'Investimentos'],
   ['analise', 'grafico', 'Saúde'],
   ['tudo', 'menu', 'Tudo'],
 ];
 
 const TITULOS = {
-  painel: 'Painel', cartoes: 'Cartões', dividas: 'Dívidas', analise: 'Saúde',
+  painel: 'Painel', cartoes: 'Finanças', dividas: 'Dívidas', analise: 'Saúde',
   tudo: 'Tudo', cofrinhos: 'Cofrinhos', recebimentos: 'Recebimentos',
-  revisao: 'Revisão', guia: 'Como usar', faturas: 'Faturas',
+  revisao: 'Revisão', guia: 'Como usar', faturas: 'Faturas', investimentos: 'Investimentos',
 };
 
 let esconder = false;
@@ -161,7 +161,7 @@ function faixaExemplo(app) {
 }
 
 function tabbar(atual) {
-  const pai = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel' }[atual] || atual;
+  const pai = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel', dividas: 'tudo' }[atual] || atual;
   return `<nav class="tabbar"><div class="in">
     ${TABS.map(([id, ic, label]) => `
       <button class="tab ${pai === id ? 'on' : ''}" data-go="${id}" aria-current="${pai === id ? 'page' : 'false'}">
@@ -444,7 +444,7 @@ function linha(t, v, { acao = 'editar' } = {}) {
 
 function cartoes(app) {
   const v = app.view;
-  const contas = app.doc.accounts;
+  const contas = app.doc.accounts.filter((a) => a.type !== 'investment');
 
   return `
   ${header(app)}
@@ -531,12 +531,12 @@ function faturaCartao(c, v) {
 
 // ============================================================ FATURAS
 
-/** Relatório de faturas: todos os cartões, sem passar pela tela de Cartões inteira. */
+/** Relatório de faturas: todos os cartões, sem passar pela tela de Finanças inteira. */
 function faturas(app) {
   const v = app.view;
   if (!v.cartoes.length) {
     return `${header(app, { voltar: 'painel' })}
-      <div class="empty" style="margin-top:40px">Cadastre um cartão em Cartões para ver a fatura aqui.</div>`;
+      <div class="empty" style="margin-top:40px">Cadastre um cartão em Finanças para ver a fatura aqui.</div>`;
   }
 
   const abertoTotal = sum(v.cartoes.map((c) => c.openCents));
@@ -575,7 +575,7 @@ function barras(meses) {
 function dividas(app) {
   const v = app.view;
   if (!v.dividas.length) {
-    return `${header(app)}
+    return `${header(app, { voltar: 'tudo' })}
       <div class="empty" style="margin-top:40px">
         Nenhuma dívida cadastrada.<br><br>
         Se você tem fatura atrasada ou cheque especial, cadastre aqui com a taxa —
@@ -589,7 +589,7 @@ function dividas(app) {
   const ganho = plano?.done && so_minimo?.done ? comparePlans(so_minimo, plano) : null;
 
   return `
-  ${header(app)}
+  ${header(app, { voltar: 'tudo' })}
 
   <div class="hero">
     <div class="top"><span class="lbl">Você deve hoje</span></div>
@@ -761,7 +761,7 @@ function analise(app) {
     ${kpi('Patrimônio', m(s.netWorth.netCents, brlShort), s.netWorth.netCents < 0 ? 'negativo' : 'líquido')}
   </div>
 
-  ${v.orcamento.length ? `
+  ${v.orcamentoVariavel.length ? `
   <div class="sec">
     <div class="sh"><h3>Tetos do mês</h3><a data-act="tetos">Ajustar</a></div>
     ${v.orcamentoGeral ? `<div class="panel" style="margin-bottom:10px">
@@ -774,15 +774,7 @@ function analise(app) {
       <div class="ft"><span style="font-size:10.5px;color:var(--muted)">a marca escura é onde você deveria estar hoje</span>
         <span style="font-size:10.5px;color:var(--muted)">${m(v.orcamentoGeral.safePerDayCents)}/dia até fechar</span></div>
     </div>` : ''}
-    ${v.orcamento.map(categoria).join('')}
-    ${v.tetoEmFixa.length ? `<div class="nudge" style="margin-top:10px">
-      <span class="ic">${icon('ajuda')}</span>
-      <div><b>${esc(v.tetoEmFixa.map((c) => c.name).join(', '))} ${v.tetoEmFixa.length === 1 ? 'é gasto fixo' : 'são gastos fixos'}</b>
-      <i>teto serve para o que varia. Aluguel e contas têm valor e dia certos — cadastre em
-         Tudo → Gastos fixos, que é de lá que a projeção tira o dinheiro. Aqui ${v.tetoEmFixa.length === 1 ? 'ele fica' : 'eles ficam'}
-         sempre em R$ 0 gasto, porque o lançamento não passa por categoria.</i></div>
-      <span class="arr">${icon('seta')}</span>
-    </div>` : ''}
+    ${v.orcamentoVariavel.map(categoria).join('')}
   </div>` : `
   <div class="sec">
     <div class="sh"><h3>Tetos do mês</h3></div>
@@ -790,6 +782,17 @@ function analise(app) {
       <div class="btns" style="justify-content:center"><button class="btn primary" data-act="tetos">Definir tetos</button></div>
     </div>
   </div>`}
+
+  ${v.categoriasFixas.length ? `
+  <div class="sec">
+    <div class="sh"><h3>Gastos fixos</h3><a>sem meta — valor e dia certos</a></div>
+    <div class="list">${v.categoriasFixas.map((c) => `
+      <div class="row">
+        <div class="ic">${icon('relogio')}</div>
+        <div class="bd"><div class="t">${esc(c.name)}</div><div class="s">todo mês, o mesmo valor</div></div>
+        <div class="rt"><div class="amt num">${m(c.fixedCents, brlShort)}</div></div>
+      </div>`).join('')}</div>
+  </div>` : ''}
 
   <div class="sec">
     <div class="sh"><h3>Fixo contra variável</h3><a>${percent(v.fixoVariavel.fixedRatio, 0)} fixo</a></div>
@@ -938,11 +941,10 @@ function tudo(app) {
     <div class="sh"><h3>Dinheiro</h3></div>
     <div class="list">
       ${item('go:recebimentos', 'dinheiro', 'Recebimentos', `fixo ${m(v.rendaFixaCents, brlShort)} · avulsos ${m(v.extrasMesCents, brlShort)} este mês`, 'j')}
-      ${item('go:cofrinhos', 'cofre', 'Cofrinhos', `${app.doc.goals.length} · ${m(v.guardadoCents, brlShort)} guardado`)}
+      ${item('go:dividas', 'escudoOk', 'Dívidas', v.dividaTotalCents > 0 ? `${m(v.dividaTotalCents, brlShort)} · ordem certa de pagar` : 'nenhuma cadastrada', v.dividaTotalCents > 0 ? 'r' : '')}
       ${item('fixos', 'relogio', 'Gastos fixos', `${app.doc.recurring.filter((r) => r.kind === 'expense').length} contas · ${m(v.fixosCents, brlShort)} por mês`)}
       ${item('tetos', 'grafico', 'Tetos por categoria', `${Object.keys(app.doc.budgets || {}).length} categorias com limite`)}
-      ${item('patrimonio', 'banco', 'Patrimônio', `${m(v.saude.netWorth.netCents, brlShort)} líquido hoje`)}
-      ${item('projetos', 'carro', 'Projetos de vida', `${app.doc.projects.length} · carro, casa, o que você quiser medir junto`)}
+      ${item('patrimonio', 'banco', 'Atualizar saldos', 'copia o saldo de cada banco pra manter a projeção honesta')}
       ${item('go:guia', 'ajuda', 'Como usar o Zero', `${v.guia.feitos} de ${v.guia.total} passos feitos${v.guia.pendentes.length ? ` · faltam ${v.guia.pendentes.length}` : ''}`, 'a')}
     </div>
   </div>
@@ -1018,7 +1020,7 @@ function cofrinho(g) {
       <div style="display:flex;gap:11px;align-items:center;min-width:0">
         <div class="ic" style="background:var(--jade-soft);color:var(--jade)">${icon(g.kind === 'reserva' ? 'escudo' : 'cofre')}</div>
         <div style="min-width:0"><div class="nm">${esc(g.name)}</div>
-          <div class="sb">${g.status === 'pausado' ? 'pausado' : meses !== null ? `${meses} ${meses === 1 ? 'mês' : 'meses'} no ritmo atual` : 'sem aporte definido'}</div></div>
+          <div class="sb">${g.status === 'pausado' ? 'pausado' : meses !== null ? `${meses} ${meses === 1 ? 'mês' : 'meses'} no ritmo atual` : 'sem aporte definido'}${g.deadline ? ` · até ${formatShort(g.deadline)}` : ''}</div></div>
       </div>
       <button class="ib" data-act="editar-cofrinho" data-id="${esc(g.id)}" aria-label="Editar">${icon('engrenagem')}</button>
     </div>
@@ -1028,6 +1030,66 @@ function cofrinho(g) {
       <span style="font-size:11px;color:var(--muted)">${g.monthlyCents ? `${m(g.monthlyCents, brlShort)}/mês` : 'parado'}</span>
     </div>
   </div>`;
+}
+
+// ============================================================ INVESTIMENTOS
+
+function investimentos(app) {
+  const v = app.view;
+  const s = v.saude;
+  const contasInv = app.doc.accounts.filter((a) => a.type === 'investment');
+  const bens = app.doc.assets || [];
+  const metas = app.doc.goals;
+
+  return `
+  ${header(app)}
+
+  <div class="hero">
+    <div class="top"><span class="lbl">Patrimônio</span></div>
+    <div class="big ser">${m(s.netWorth.netCents, brlShort)}</div>
+    <div class="foot"><span class="acc">${m(s.netWorth.contasCents, brlShort)} em contas · ${m(s.netWorth.bensCents, brlShort)} em bens · ${m(s.netWorth.liabilitiesCents, brlShort)} em dívidas</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="sh"><h3>Contas de investimento</h3><a data-act="nova-conta">Adicionar</a></div>
+    ${contasInv.length ? `<div class="list">${contasInv.map((a) => `
+      <button class="row" data-act="editar-conta" data-id="${esc(a.id)}">
+        <div class="ic j">${icon('cofre')}</div>
+        <div class="bd"><div class="t">${esc(a.name)}</div><div class="s">investimento</div></div>
+        <div class="rt"><div class="amt num">${m(a.balanceCents)}</div></div>
+      </button>`).join('')}</div>`
+      : '<div class="empty">Nenhuma conta de investimento ainda.<br>Renda fixa, ações, cripto — o que você já tem investido.</div>'}
+  </div>
+
+  <div class="sec">
+    <div class="sh"><h3>Metas e cofrinhos</h3><a data-act="novo-cofrinho">Criar</a></div>
+    ${metas.length ? metas.map(cofrinho).join('')
+      : '<div class="empty">Nenhuma meta ainda.<br>Comece pela reserva de emergência.</div>'}
+  </div>
+
+  <div class="sec">
+    <div class="sh"><h3>Bens</h3><a data-act="novo-bem">Adicionar</a></div>
+    ${bens.length ? `<div class="list">${bens.map((b) => `
+      <button class="row" data-act="editar-bem" data-id="${esc(b.id)}">
+        <div class="ic">${icon('carro')}</div>
+        <div class="bd"><div class="t">${esc(b.name)}</div><div class="s">bem</div></div>
+        <div class="rt"><div class="amt num">${m(b.valueCents, brlShort)}</div></div>
+      </button>`).join('')}</div>`
+      : '<div class="empty">Nenhum bem cadastrado.<br>Carro, moto, casa — o que também é seu além do que está em conta.</div>'}
+  </div>
+
+  <div class="sec">
+    <div class="sh"><h3>Projetos de vida</h3></div>
+    <div class="list">
+      <button class="row" data-act="projetos">
+        <div class="ic">${icon('carro')}</div>
+        <div class="bd"><div class="t">${app.doc.projects.length} projeto${app.doc.projects.length === 1 ? '' : 's'}</div>
+          <div class="s">quanto o carro, a casa ou o pet custa de verdade, somando as categorias</div></div>
+        <span class="arr">${icon('seta')}</span>
+      </button>
+    </div>
+  </div>
+  `;
 }
 
 // ============================================================ RECEBIMENTOS
@@ -1190,11 +1252,11 @@ function guia(app) {
   ${bloco('Toda semana', '3 minutos',
     rotina('Categorizar o que entrou', 'em Revisão · um toque em cada, o app aprende e não pergunta de novo') +
     rotina('Ler os avisos', 'em Revisão · vazamentos, aumento de preço e cobrança duplicada') +
-    rotina('Conferir se o saldo bate', 'em Cartões · se não bater, ajuste na hora'))}
+    rotina('Conferir se o saldo bate', 'em Finanças · se não bater, ajuste na hora'))}
 
   ${bloco('Todo mês', '2 minutos',
-    rotina('Quando a fatura fechar', 'em Cartões · confira antes de vencer', 'a') +
-    rotina('Atualizar saldo das contas', 'em Cartões · digite o saldo de cada instituição', 'a') +
+    rotina('Quando a fatura fechar', 'em Finanças · confira antes de vencer', 'a') +
+    rotina('Atualizar saldo das contas', 'em Finanças · digite o saldo de cada instituição', 'a') +
     rotina('Lançar as entradas avulsas', 'em Recebimentos · trader, serviço por fora, reembolso', 'a') +
     rotina('Fazer o backup', 'em Tudo · sem servidor, o backup é a sua única cópia', 'a'))}
 
@@ -1203,10 +1265,10 @@ function guia(app) {
     <div class="list">
       ${[
         ['painel', 'casa', 'Painel', 'o resumo do dia. O número grande é quanto falta pra sair', 'j'],
-        ['cartoes', 'cartao', 'Cartões', 'seus cartões, contas, fatura aberta e o muro de parcelas', ''],
-        ['dividas', 'escudoOk', 'Dívidas', 'a ordem certa de pagar e a data em que você fica livre', 'r'],
-        ['analise', 'grafico', 'Saúde', 'para onde foi o dinheiro, tetos, vazamentos e diagnóstico', 'a'],
-        ['tudo', 'menu', 'Tudo', 'recebimentos, cofrinhos, projetos, backup e seus dados', ''],
+        ['cartoes', 'cartao', 'Finanças', 'seus cartões, contas, fatura aberta e o muro de parcelas', ''],
+        ['investimentos', 'cofre', 'Investimentos', 'contas de investimento, cofrinhos, metas com prazo e bens', 'j'],
+        ['analise', 'grafico', 'Saúde', 'para onde foi o dinheiro, tetos e vazamentos', 'a'],
+        ['tudo', 'menu', 'Tudo', 'dívidas, recebimentos, backup e seus dados', ''],
       ].map(([id, ic, nome, texto, cor]) => `
         <button class="row" data-go="${id}">
           <div class="ic ${cor}">${icon(ic)}</div>
@@ -1225,4 +1287,4 @@ function guia(app) {
   `;
 }
 
-const TELAS = { painel, cartoes, dividas, analise, tudo, cofrinhos, recebimentos, revisao, guia, faturas };
+const TELAS = { painel, cartoes, dividas, analise, tudo, cofrinhos, recebimentos, revisao, guia, faturas, investimentos };

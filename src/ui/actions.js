@@ -107,9 +107,12 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
       </div>`;
     }
     if (c.type === 'checkbox') {
-      return `<div class="field" style="flex-direction:row;align-items:center;gap:10px">
-        <input type="checkbox" id="${id}" name="${c.name}" ${c.value ? 'checked' : ''} style="width:22px;height:22px">
-        <label for="${id}" style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink-2)">${esc(c.label)}</label></div>`;
+      return `<div class="field">
+        <div style="display:flex;flex-direction:row;align-items:center;gap:10px">
+          <input type="checkbox" id="${id}" name="${c.name}" ${c.value ? 'checked' : ''} style="width:22px;height:22px">
+          <label for="${id}" style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink-2)">${esc(c.label)}</label>
+        </div>
+        ${c.hint ? `<span style="font-size:11px;color:var(--muted)">${esc(c.hint)}</span>` : ''}</div>`;
     }
     if (c.type === 'nota') {
       return `<p style="font-size:12px;color:var(--muted);line-height:1.6;margin:18px 0 12px;
@@ -411,6 +414,8 @@ const ACOES = {
   // ---- cofrinhos ----
   async 'novo-cofrinho'() { await editarCofrinho(null); },
   async 'editar-cofrinho'({ id }) { await editarCofrinho(id); },
+  async 'novo-bem'() { await editarBem(null); },
+  async 'editar-bem'({ id }) { await editarBem(id); },
 
   // ---- renda ----
   async 'nova-renda'() { await editarRecorrente(null, 'income'); },
@@ -450,26 +455,15 @@ const ACOES = {
   },
 
   async tetos() {
-    const uteis = app.doc.categories.filter((c) => c.id !== 'renda');
+    // Teto é para o que VARIA. Categoria fixa (Moradia, Contas da casa...) tem
+    // valor e dia certos vindos de Gastos fixos — não entra aqui nem como
+    // opção, pra não voltar a virar barra presa em "R$ 0 gasto".
+    const variaveis = app.doc.categories.filter((c) => c.id !== 'renda' && !c.fixed);
     const campo = (c) => ({ name: c.id, label: c.name, type: 'money', value: app.doc.budgets?.[c.id] || 0 });
 
-    // Teto é para o que VARIA. Aluguel não varia: ele tem valor e data, e o
-    // lugar dele é em Gastos fixos. Misturar os dois numa lista só fez alguém
-    // cadastrar moradia aqui, ver "R$ 0 de R$ 900" para sempre, e ter de
-    // cadastrar de novo no outro lugar.
-    const variaveis = uteis.filter((c) => !c.fixed);
-    const fixas = uteis.filter((c) => c.fixed);
-
-    const campos = [
-      ...variaveis.map(campo),
-      { name: '__nota', type: 'nota',
-        label: 'As de baixo são gastos fixos: têm valor e dia certos. O lugar delas é Tudo → Gastos fixos, que é o que entra na projeção. Teto aqui só faz sentido se você quiser vigiar um extra dentro da categoria.' },
-      ...fixas.map(campo),
-    ];
-
     const r = await form('Tetos por categoria',
-      'Teto é para o gasto que varia — mercado, delivery, lazer. Zero significa sem teto, e teto em tudo vira teto em nada: comece pelas três que mais escapam.',
-      campos);
+      'Teto é para o gasto que varia — mercado, delivery, lazer. Zero significa sem teto, e teto em tudo vira teto em nada: comece pelas três que mais escapam. Moradia, contas e outros gastos fixos não aparecem aqui — eles vêm de Tudo → Gastos fixos.',
+      variaveis.map(campo));
     if (!r) return;
 
     await commit((d) => {
@@ -484,7 +478,7 @@ const ACOES = {
       name: a.id, label: a.name, type: 'money', value: a.balanceCents,
       hint: a.balanceCents < 0 ? 'negativo — digite sem o sinal e marque abaixo' : '',
     }));
-    if (!campos.length) { toast('Cadastre uma conta primeiro, em Cartões.'); return; }
+    if (!campos.length) { toast('Cadastre uma conta primeiro, em Finanças.'); return; }
 
     const r = await form('Atualizar saldos',
       'Abra o app de cada banco e copie o saldo. Trinta segundos por mês — é o que mantém a projeção honesta.',
@@ -836,7 +830,8 @@ async function editarLancamento(id, sugestao = {}) {
       { name: 'categoryId', label: 'Categoria', type: 'select', value: tx?.categoryId ?? sugestao.categoryId ?? '', options: opcoesCategoria() },
       { name: 'count', label: 'Parcelas', type: 'number', value: sugestao.count || 1, min: 1, max: 48,
         hint: '1 para à vista. Só existe pagando no crédito.' },
-      { name: 'extraordinary', label: 'Entrada avulsa (trader, serviço por fora)', type: 'checkbox', value: tx?.extraordinary ?? sugestao.extraordinary ?? false },
+      { name: 'extraordinary', label: 'Entrada avulsa (trader, serviço por fora)', type: 'checkbox', value: tx?.extraordinary ?? sugestao.extraordinary ?? false,
+        hint: 'marque se não é o seu salário de sempre. Entra na soma do mês, mas a projeção não conta com ela se repetir mês que vem' },
     ],
     {
       ok: tx ? 'Salvar' : 'Lançar',
@@ -942,6 +937,7 @@ async function editarConta(id) {
         { value: 'checking', label: 'Conta corrente' },
         { value: 'savings', label: 'Reserva / poupança' },
         { value: 'cash', label: 'Dinheiro' },
+        { value: 'investment', label: 'Investimento' },
       ] },
     { name: 'saldo', label: 'Saldo hoje', type: 'money', value: Math.abs(c?.balanceCents || 0) },
     { name: 'negativo', label: 'Está negativo', type: 'checkbox', value: (c?.balanceCents || 0) < 0 },
@@ -1154,13 +1150,14 @@ async function editarDivida(id) {
 
 async function editarCofrinho(id) {
   const g = id ? app.doc.goals.find((x) => x.id === id) : null;
-  const r = await form(g ? 'Editar cofrinho' : 'Novo cofrinho', null, [
+  const r = await form(g ? 'Editar meta' : 'Nova meta ou cofrinho', null, [
     { name: 'name', label: 'Para quê', type: 'text', value: g?.name || '', placeholder: 'Reserva de emergência' },
     { name: 'alvo', label: 'Quanto quer juntar', type: 'money', value: g?.targetCents || 0 },
     { name: 'guardado', label: 'Já tem', type: 'money', value: g?.savedCents || 0 },
     { name: 'mensal', label: 'Guarda por mês', type: 'money', value: g?.monthlyCents || 0 },
+    { name: 'prazo', label: 'Prazo (opcional)', type: 'date', value: g?.deadline || '' },
     { name: 'pausado', label: 'Pausado', type: 'checkbox', value: g?.status === 'pausado' },
-  ], { ok: 'Salvar', apagar: g ? 'Apagar cofrinho' : null });
+  ], { ok: 'Salvar', apagar: g ? 'Apagar' : null });
   if (!r) return;
 
   if (r.__apagar) {
@@ -1176,10 +1173,34 @@ async function editarCofrinho(id) {
     savedCents: r.guardado,
     monthlyCents: r.pausado ? 0 : r.mensal,
     status: r.pausado ? 'pausado' : 'ativo',
+    deadline: r.prazo || null,
     kind: g?.kind,
   };
   await commit((d) => {
     d.goals = id ? d.goals.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.goals, registro];
+  });
+  toast('Salvo.');
+}
+
+async function editarBem(id) {
+  const b = id ? app.doc.assets.find((x) => x.id === id) : null;
+  const r = await form(b ? 'Editar bem' : 'Novo bem', 'Carro, moto, casa — o que é seu além do que está em conta.', [
+    { name: 'name', label: 'O que é', type: 'text', value: b?.name || '', placeholder: 'Carro' },
+    { name: 'valor', label: 'Valor estimado', type: 'money', value: b?.valueCents || 0 },
+  ], { ok: 'Salvar', apagar: b ? 'Apagar' : null });
+  if (!r) return;
+
+  if (r.__apagar) {
+    await commit((d) => { d.assets = (d.assets || []).filter((x) => x.id !== id); });
+    toast('Apagado.');
+    return;
+  }
+
+  const registro = { id: id || novoId('bem'), name: r.name || 'Bem', valueCents: r.valor };
+  await commit((d) => {
+    d.assets = id
+      ? (d.assets || []).map((x) => (x.id === id ? { ...x, ...registro } : x))
+      : [...(d.assets || []), registro];
   });
   toast('Salvo.');
 }
@@ -1314,10 +1335,10 @@ function pedirFrase() {
  */
 const TOUR_PASSOS = [
   { screen: 'painel', titulo: 'Painel', texto: 'Sua tela de todo dia. Lança o gasto na hora, vê o resumo do momento e quanto falta para sair das dívidas.' },
-  { screen: 'cartoes', titulo: 'Cartões', texto: 'Suas contas e cartões, a fatura aberta de cada um, e o muro de parcelas — quanto já está comprometido nos próximos meses.' },
-  { screen: 'dividas', titulo: 'Dívidas', texto: 'Todas as suas dívidas, na ordem certa de atacar (o juro mais caro primeiro, não o maior saldo) — e a data em que você fica livre.' },
-  { screen: 'analise', titulo: 'Saúde', texto: 'Seu diagnóstico financeiro: custo de vida mínimo, reserva de emergência, patrimônio, e os tetos do mês por categoria.' },
-  { screen: 'tudo', titulo: 'Tudo', texto: 'Recebimentos, gastos fixos, cofrinhos, projetos, importar extrato do banco e fazer backup — o que não cabe nas outras abas.' },
+  { screen: 'cartoes', titulo: 'Finanças', texto: 'Suas contas e cartões, a fatura aberta de cada um, e o muro de parcelas — quanto já está comprometido nos próximos meses.' },
+  { screen: 'investimentos', titulo: 'Investimentos', texto: 'Contas de investimento, cofrinhos e metas com prazo, e os bens que também contam no seu patrimônio — carro, moto, casa.' },
+  { screen: 'analise', titulo: 'Saúde', texto: 'Seu diagnóstico financeiro: custo de vida mínimo, reserva de emergência, e os tetos do mês por categoria.' },
+  { screen: 'tudo', titulo: 'Tudo', texto: 'Dívidas, recebimentos, gastos fixos, importar extrato do banco e fazer backup — o que não cabe nas outras abas.' },
 ];
 
 async function tourGuiado(indice = 0) {

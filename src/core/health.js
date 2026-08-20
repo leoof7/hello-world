@@ -113,24 +113,37 @@ export function allocation(transactions, categories, monthKeyStr, savedCents = 0
 /**
  * Patrimônio líquido: o que é seu menos o que você deve.
  *
+ * Patrimônio não é só o saldo em conta — carro, moto e casa também são seus.
+ * `bens` carrega esse valor à parte, e o retorno separa quanto é conta
+ * (líquido, sacável hoje) de quanto é bem (não é dinheiro na mão).
+ *
  * Conta negativa com cheque especial cadastrado como dívida (accountId) já
  * conta o saldo negativo por lá, com juro e tudo — somar de novo aqui contaria
  * a mesma dívida duas vezes.
  */
-export function netWorth(accounts, debts) {
+export function netWorth(accounts, debts, bens = []) {
   const contasComDivida = new Set(debts.filter((d) => d.accountId).map((d) => d.accountId));
-  const ativos = sum(accounts.filter((a) => a.balanceCents > 0).map((a) => a.balanceCents));
+  const contasCents = sum(accounts.filter((a) => a.balanceCents > 0).map((a) => a.balanceCents));
+  const bensCents = sum(bens.map((b) => Math.max(0, b.valueCents || 0)));
+  const ativos = contasCents + bensCents;
   const passivos = totalBalance(debts) + sum(
     accounts.filter((a) => a.balanceCents < 0 && !contasComDivida.has(a.id)).map((a) => Math.abs(a.balanceCents))
   );
-  return { assetsCents: ativos, liabilitiesCents: passivos, netCents: ativos - passivos };
+  return {
+    assetsCents: ativos,
+    liabilitiesCents: passivos,
+    netCents: ativos - passivos,
+    contasCents,
+    bensCents,
+    porConta: accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, balanceCents: a.balanceCents })),
+  };
 }
 
 /**
  * Monta o diagnóstico completo. Cada item carrega a explicação de como foi
  * calculado, porque indicador que não se explica não muda comportamento.
  */
-export function diagnose({ transactions, categories, accounts, debts, incomeCents, savedCents, todayISO, minimumCostManualCents = 0, minimumCostFixedCents = 0 }) {
+export function diagnose({ transactions, categories, accounts, debts, incomeCents, savedCents, todayISO, minimumCostManualCents = 0, minimumCostFixedCents = 0, bens = [] }) {
   const mes = monthKey(todayISO);
   const custoMinimo = minimumCostOfLiving(transactions, categories, todayISO,
     { manualCents: minimumCostManualCents, fixedEssentialCents: minimumCostFixedCents });
@@ -149,7 +162,7 @@ export function diagnose({ transactions, categories, accounts, debts, incomeCent
     savings: poupanca,
     emergency: reserva,
     allocation: allocation(transactions, categories, mes, poupanca.savedCents),
-    netWorth: netWorth(accounts, debts),
+    netWorth: netWorth(accounts, debts, bens),
     monthlyInterestCents: jurosMes,
     interestRatio: incomeCents ? jurosMes / incomeCents : 0,
   };

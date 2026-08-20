@@ -41,8 +41,11 @@ export function derive(doc, todayISO = today()) {
   const minimosCents = minimumsToday(doc.debts);
 
   // ---- caixa ----
-  const saldoCents = sum(doc.accounts.filter((a) => a.type !== 'savings').map((a) => a.balanceCents));
+  // Investimento não é dinheiro do dia a dia — fica de fora do saldo
+  // disponível e da reserva, com número próprio na aba Investimentos.
+  const saldoCents = sum(doc.accounts.filter((a) => a.type !== 'savings' && a.type !== 'investment').map((a) => a.balanceCents));
   const guardadoCents = sum(doc.accounts.filter((a) => a.type === 'savings').map((a) => a.balanceCents));
+  const investidoCents = sum(doc.accounts.filter((a) => a.type === 'investment').map((a) => a.balanceCents));
 
   const eventos = buildEvents(
     {
@@ -103,10 +106,18 @@ export function derive(doc, todayISO = today()) {
   const comTeto = categorias.map((c) => ({ ...c, limitCents: doc.budgets?.[c.id] || 0 }));
   const orcamento = monthStatus(comTeto, doc.transactions, todayISO);
   const orcamentoGeral = orcamento.length ? overall(orcamento, todayISO) : null;
-  // Teto numa categoria fixa nunca sai de zero: o gasto fixo é recorrente e não
-  // passa por lançamento categorizado. A tela avisa em vez de deixar a barra
-  // parada para sempre sem explicação.
-  const tetoEmFixa = orcamento.filter((c) => c.fixed && c.limitCents > 0);
+  // Teto é pra gasto que varia. Categoria fixa (Moradia, Contas da casa...) tem
+  // valor e dia certos vindos de Gastos fixos — vira lista informativa em vez
+  // de barra de progresso presa em "R$ 0 gasto" pra sempre.
+  const orcamentoVariavel = orcamento.filter((c) => !c.fixed);
+  const gastoFixoPorCategoria = new Map();
+  for (const r of doc.recurring || []) {
+    if (r.kind !== 'expense' || !r.categoryId) continue;
+    gastoFixoPorCategoria.set(r.categoryId, (gastoFixoPorCategoria.get(r.categoryId) || 0) + Math.abs(r.amountCents));
+  }
+  const categoriasFixas = categorias
+    .filter((c) => c.fixed && gastoFixoPorCategoria.has(c.id))
+    .map((c) => ({ ...c, fixedCents: gastoFixoPorCategoria.get(c.id) }));
   const fixoVariavel = fixedVsVariable(doc.transactions, categorias, mes);
 
   // ---- vazamentos e diagnóstico ----
@@ -121,6 +132,7 @@ export function derive(doc, todayISO = today()) {
     todayISO,
     minimumCostManualCents: doc.profile?.minimumCostCents || 0,
     minimumCostFixedCents: fixosEssenciaisCents,
+    bens: doc.assets || [],
   });
 
   // ---- fila de revisão ----
@@ -164,6 +176,7 @@ export function derive(doc, todayISO = today()) {
     progresso,
     saldoCents,
     guardadoCents,
+    investidoCents,
     eventos,
     projecao,
     porMes,
@@ -180,7 +193,8 @@ export function derive(doc, todayISO = today()) {
     planoMinimo,
     orcamento,
     orcamentoGeral,
-    tetoEmFixa,
+    orcamentoVariavel,
+    categoriasFixas,
     piorCategoria: orcamento.length ? worst(orcamento) : null,
     fixoVariavel,
     vazamentos,
@@ -315,12 +329,12 @@ function minimosAgendados(debts, todayISO) {
 /** Os sete passos do "Como usar" — o que já está feito e o que falta. */
 export function guiaStatus(doc) {
   const passos = [
-    { id: 'cartoes', label: 'Cartões e contas', where: 'em Cartões', hint: 'fechamento, vencimento e limite de cada um', go: 'cartoes', done: doc.cards.length > 0 && doc.accounts.length > 0 },
+    { id: 'cartoes', label: 'Cartões e contas', where: 'em Finanças', hint: 'fechamento, vencimento e limite de cada um', go: 'cartoes', done: doc.cards.length > 0 && doc.accounts.length > 0 },
     { id: 'dividas', label: 'Dívidas e taxas', where: 'em Dívidas', hint: 'o juro vem escrito na fatura e no extrato', go: 'dividas', done: doc.debts.length > 0 },
     { id: 'fixos', label: 'Renda e gastos fixos', where: 'em Tudo', hint: 'salário, aluguel, luz, internet, assinaturas', go: 'tudo', done: (doc.recurring || []).length >= 2 },
     { id: 'tetos', label: 'Tetos por categoria', where: 'em Saúde', hint: 'quanto pode gastar em cada coisa', go: 'analise', done: Object.keys(doc.budgets || {}).length > 0 },
     { id: 'custo', label: 'Custo de vida mínimo', where: 'em Saúde', hint: 'só o que não dá pra cortar. É a base de tudo', go: 'analise', done: (doc.profile?.minimumCostCents || 0) > 0 },
-    { id: 'cofrinhos', label: 'Criar seus cofrinhos', where: 'em Tudo', hint: 'comece só pela reserva de emergência', go: 'cofrinhos', done: (doc.goals || []).length > 0 },
+    { id: 'cofrinhos', label: 'Criar seus cofrinhos', where: 'em Investimentos', hint: 'comece só pela reserva de emergência', go: 'investimentos', done: (doc.goals || []).length > 0 },
     { id: 'backup', label: 'Primeiro backup', where: 'em Tudo', hint: 'sem servidor, o backup é você quem faz', go: 'tudo', done: !!doc.profile?.backupFeito },
   ];
   const feitos = passos.filter((p) => p.done).length;

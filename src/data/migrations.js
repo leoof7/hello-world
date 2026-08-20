@@ -30,7 +30,8 @@ export function emptyDocument() {
     rules: [],         // regras de categorização do usuário
     memory: {},        // contraparte → categoria aprendida
     budgets: {},       // categoriaId → teto em centavos
-    goals: [],         // cofrinhos
+    goals: [],         // cofrinhos e metas com prazo
+    assets: [],        // bens: carro, moto, casa — valor estimado, entram no patrimônio
     snapshots: [],     // patrimônio mês a mês, digitado à mão
     settings: {
       theme: 'auto',
