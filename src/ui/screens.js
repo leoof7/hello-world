@@ -4,7 +4,7 @@
 // Para um app deste tamanho isso é mais rápido e muito mais fácil de ler do que
 // qualquer árvore de componentes, e não custa 40 KB de framework no 4G.
 
-import { brl, brlShort, formatCents, percent } from '../core/money.js';
+import { brl, brlShort, formatCents, percent, sum } from '../core/money.js';
 import { formatShort, formatLong, formatMonthKey, monthAbbr, addMonthKey, parts, daysBetween } from '../core/dates.js';
 import { KIND, horizon, comparePlans } from '../core/debts.js';
 import { backupMessage } from '../data/backup.js';
@@ -15,14 +15,14 @@ const TABS = [
   ['painel', 'casa', 'Painel'],
   ['cartoes', 'cartao', 'Cartões'],
   ['dividas', 'escudoOk', 'Dívidas'],
-  ['analise', 'grafico', 'Análise'],
+  ['analise', 'grafico', 'Saúde'],
   ['tudo', 'menu', 'Tudo'],
 ];
 
 const TITULOS = {
-  painel: 'Painel', cartoes: 'Cartões', dividas: 'Dívidas', analise: 'Análise',
+  painel: 'Painel', cartoes: 'Cartões', dividas: 'Dívidas', analise: 'Saúde',
   tudo: 'Tudo', cofrinhos: 'Cofrinhos', recebimentos: 'Recebimentos',
-  revisao: 'Revisão', guia: 'Como usar',
+  revisao: 'Revisão', guia: 'Como usar', faturas: 'Faturas',
 };
 
 let esconder = false;
@@ -30,8 +30,68 @@ let esconder = false;
 /** Valor formatado, respeitando o olho fechado. */
 const m = (cents, fn = brl) => (esconder ? '••••' : fn(cents));
 
+// ==================================================== ANTES DE COMEÇAR
+//
+// Três passos mínimos, um de cada vez, antes de liberar o resto do app —
+// sem eles a projeção, o diagnóstico e os tetos mostram números que não
+// significam nada. Só roda em documento criado depois deste recurso: um
+// documento sem `profile.onboarding` é de alguém que já usa o app, e não
+// merece ficar travado por uma tela nova.
+const PASSOS_OBRIGATORIOS = [
+  { id: 'contas', titulo: 'Suas contas', texto: 'Onde o seu dinheiro mora — conta corrente, poupança ou dinheiro. É de onde tudo sai.',
+    done: (doc) => doc.accounts.length > 0, acao: 'nova-conta', rotulo: 'Adicionar conta' },
+  { id: 'dividas', titulo: 'Suas dívidas', texto: 'Rotativo, cheque especial, empréstimo ou parcelamento já contratado.',
+    done: (doc) => doc.debts.length > 0, acao: 'nova-divida', rotulo: 'Adicionar dívida', pulavel: true },
+  { id: 'fixos', titulo: 'Renda e gastos fixos', texto: 'O que entra e o que sai todo mês na mesma data — salário, aluguel, contas. É a base de toda projeção.',
+    done: (doc) => (doc.recurring || []).length > 0, acao: 'nova-renda', rotulo: 'Adicionar renda fixa' },
+];
+
+const passoResolvido = (doc, p) => p.done(doc) || doc.profile?.onboarding?.steps?.[p.id] === 'pulado';
+
+function onboardingPendente(doc) {
+  if (!doc?.profile?.onboarding) return false;
+  return PASSOS_OBRIGATORIOS.some((p) => !passoResolvido(doc, p));
+}
+
+function onboarding(app) {
+  const doc = app.doc;
+  const passo = PASSOS_OBRIGATORIOS.find((p) => !passoResolvido(doc, p));
+  const indice = PASSOS_OBRIGATORIOS.indexOf(passo);
+
+  return `
+  <div class="hd">
+    <div class="greet"><span class="s">Antes de começar · passo ${indice + 1} de ${PASSOS_OBRIGATORIOS.length}</span>
+      <span class="n">${esc(passo.titulo)}</span></div>
+  </div>
+
+  <div style="height:6px;border-radius:100px;background:var(--line-2);overflow:hidden;margin:4px 0 22px">
+    <div style="height:100%;border-radius:100px;background:var(--jade);width:${(indice / PASSOS_OBRIGATORIOS.length) * 100}%"></div>
+  </div>
+
+  <div class="sec" style="margin-top:0"><div class="say">
+    <div class="q ser">${esc(passo.titulo)}</div>
+    <p class="p">${esc(passo.texto)}</p>
+  </div></div>
+
+  <div class="btns" style="flex-direction:column;margin-top:20px">
+    <button class="btn primary" data-act="${passo.acao}" style="width:100%">${esc(passo.rotulo)}</button>
+    ${passo.pulavel ? `<button class="btn ghost" data-act="pular-onboarding" data-id="${passo.id}" style="width:100%">Não tenho isso agora</button>` : ''}
+  </div>
+  `;
+}
+
 export function render(app) {
   esconder = app.privacy;
+
+  if (onboardingPendente(app.doc)) {
+    document.getElementById('app').innerHTML = `
+      ${faixaExemplo(app)}
+      <div class="screens"><section class="screen active">${onboarding(app)}</section></div>
+    `;
+    wire(app);
+    return;
+  }
+
   const tela = TELAS[app.screen] || TELAS.painel;
   document.getElementById('app').innerHTML = `
     ${faixaAtualizacao(app)}
@@ -70,7 +130,7 @@ function faixaExemplo(app) {
 }
 
 function tabbar(atual) {
-  const pai = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel' }[atual] || atual;
+  const pai = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel' }[atual] || atual;
   return `<nav class="tabbar"><div class="in">
     ${TABS.map(([id, ic, label]) => `
       <button class="tab ${pai === id ? 'on' : ''}" data-go="${id}" aria-current="${pai === id ? 'page' : 'false'}">
@@ -153,7 +213,7 @@ function painel(app) {
   <div class="quick">
     <button class="qa" data-act="novo"><div class="ic">${icon('mais')}</div><span>Lançar</span></button>
     <button class="qa" data-act="falar"><div class="ic">${icon('microfone')}</div><span>Por frase</span></button>
-    <button class="qa" data-go="cartoes"><div class="ic">${icon('cartao')}</div><span>Fatura</span></button>
+    <button class="qa" data-go="faturas"><div class="ic">${icon('cartao')}</div><span>Fatura</span></button>
     <button class="qa" data-go="revisao"><div class="ic">${icon('lista')}</div><span>Revisão${v.revisao.length ? ` ${v.revisao.length}` : ''}</span></button>
   </div>
 
@@ -438,6 +498,32 @@ function faturaCartao(c, v) {
   </div>`;
 }
 
+// ============================================================ FATURAS
+
+/** Relatório de faturas: todos os cartões, sem passar pela tela de Cartões inteira. */
+function faturas(app) {
+  const v = app.view;
+  if (!v.cartoes.length) {
+    return `${header(app, { voltar: 'painel' })}
+      <div class="empty" style="margin-top:40px">Cadastre um cartão em Cartões para ver a fatura aqui.</div>`;
+  }
+
+  const abertoTotal = sum(v.cartoes.map((c) => c.openCents));
+  const aPagarTotal = sum(v.cartoes.map((c) => c.nextStatement?.totalCents || 0));
+
+  return `${header(app, { voltar: 'painel' })}
+
+  <div class="wrow">
+    ${kpi('Fatura aberta', m(abertoTotal, brlShort), 'soma de todos os cartões')}
+    ${kpi('A pagar agora', m(aPagarTotal, brlShort), 'próximos vencimentos')}
+  </div>
+
+  <div class="sec">
+    <div class="sh"><h3>Por cartão</h3></div>
+    ${v.cartoes.map((c) => faturaCartao(c, v)).join('')}
+  </div>`;
+}
+
 /** Barras do muro de parcelas — 12 meses, altura proporcional. */
 function barras(meses) {
   const maior = Math.max(1, ...meses.map((b) => b.cents));
@@ -636,7 +722,10 @@ function analise(app) {
   </div>
 
   <div class="wrow three">
-    ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), s.minimumCost.confident ? `média de ${s.minimumCost.months} meses` : 'ainda estimando')}
+    ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), s.minimumCost.confident
+      ? `média de ${s.minimumCost.months} meses`
+      : s.minimumCost.source === 'fixos' ? 'dos seus gastos fixos'
+      : s.minimumCost.source === 'manual' ? 'do que você digitou' : 'ainda estimando')}
     ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, `alvo ${s.emergency.targetMonths} meses`)}
     ${kpi('Patrimônio', m(s.netWorth.netCents, brlShort), s.netWorth.netCents < 0 ? 'negativo' : 'líquido')}
   </div>
@@ -1081,7 +1170,7 @@ function guia(app) {
         ['painel', 'casa', 'Painel', 'o resumo do dia. O número grande é quanto falta pra sair', 'j'],
         ['cartoes', 'cartao', 'Cartões', 'seus cartões, contas, fatura aberta e o muro de parcelas', ''],
         ['dividas', 'escudoOk', 'Dívidas', 'a ordem certa de pagar e a data em que você fica livre', 'r'],
-        ['analise', 'grafico', 'Análise', 'para onde foi o dinheiro, tetos, vazamentos e diagnóstico', 'a'],
+        ['analise', 'grafico', 'Saúde', 'para onde foi o dinheiro, tetos, vazamentos e diagnóstico', 'a'],
         ['tudo', 'menu', 'Tudo', 'recebimentos, cofrinhos, projetos, backup e seus dados', ''],
       ].map(([id, ic, nome, texto, cor]) => `
         <button class="row" data-go="${id}">
@@ -1101,4 +1190,4 @@ function guia(app) {
   `;
 }
 
-const TELAS = { painel, cartoes, dividas, analise, tudo, cofrinhos, recebimentos, revisao, guia };
+const TELAS = { painel, cartoes, dividas, analise, tudo, cofrinhos, recebimentos, revisao, guia, faturas };

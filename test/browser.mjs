@@ -226,8 +226,41 @@ async function novoAparelho(escolha) {
   await page.click('#ok');
   await page.waitForSelector(`#${escolha}`, { timeout: 20000 });
   await page.click(`#${escolha}`);
-  await page.waitForSelector('.tabbar', { timeout: 20000 });
+  await completarOnboardingObrigatorio(page);
   return { ctx, page };
+}
+
+/**
+ * Documento novo entra no tour obrigatório de 3 passos antes de liberar a
+ * navegação (contas, dívidas, renda e gastos fixos — em sequência, sem
+ * tabbar até terminar). Preenche o mínimo pelos mesmos botões que a pessoa
+ * tocaria. Documento com dados (exemplo, backup restaurado) nunca cai nesse
+ * tour, então a função só age quando o botão do primeiro passo aparece.
+ */
+async function completarOnboardingObrigatorio(page) {
+  const el = await page.waitForSelector('[data-act="nova-conta"], .tabbar', { timeout: 20000 });
+  const emOnboarding = await el.evaluate((e) => e.matches('[data-act="nova-conta"]'));
+  if (!emOnboarding) return;
+
+  await page.click('[data-act="nova-conta"]');
+  await page.waitForSelector('.sheet #frm');
+  await page.fill('.sheet [name="name"]', 'Conta teste');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(300);
+
+  await page.waitForSelector('[data-act="pular-onboarding"]', { timeout: 20000 });
+  await page.click('[data-act="pular-onboarding"]');
+  await page.waitForTimeout(300);
+
+  await page.waitForSelector('[data-act="nova-renda"]', { timeout: 20000 });
+  await page.click('[data-act="nova-renda"]');
+  await page.waitForSelector('.sheet #frm');
+  await page.fill('.sheet [name="label"]', 'Salário teste');
+  await page.fill('.sheet [name="valor"]', '1.000,00');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(300);
+
+  await page.waitForSelector('.tabbar', { timeout: 20000 });
 }
 
 const documento = (page) => page.evaluate(async () => {
@@ -273,15 +306,25 @@ const guia = async (page) => {
   await page.click('.sheet .btn.primary');
   await page.waitForTimeout(900);
 
+  // Limpar cria um documento novo, e documento novo entra no tour obrigatório
+  // de novo — mesmo comportamento de um aparelho de verdade.
+  await completarOnboardingObrigatorio(page);
+
   const limpo = await documento(page);
   ok('limpar zera os dados', limpo.tx === 0 && limpo.cartoes === 0 && limpo.dividas === 0);
   ok('e mantém as categorias', limpo.categorias > 0);
   ok('a faixa de exemplo some', !(await page.$('.demo')));
   ok('o guia volta para 0 de 7', (await guia(page)) === '0/7');
-  ok('o Painel vazio convida a começar em vez de mostrar R$ 0',
-    await page.evaluate(() => document.body.innerText.includes('Seu app está vazio')));
+  // O tour obrigatório já deixa 1 conta e 1 renda cadastradas, então o Painel
+  // não cai mais no herói "vazio" — mostra números de verdade, ainda que
+  // pequenos. Confere isso em vez do texto de app vazio, que não aparece mais.
+  ok('o Painel mostra a tela normal, não a de app vazio',
+    await page.evaluate(() => !document.body.innerText.includes('Seu app está vazio')));
 
   // o dado novo tem de sobreviver ao recarregamento, e sem refazer o cofre
+  // (o Painel não vazio não tem mais o atalho de cartão — vai pela aba)
+  await page.evaluate(() => { location.hash = '#cartoes'; });
+  await page.waitForTimeout(350);
   await page.click('[data-act="novo-cartao"]');
   await page.waitForSelector('.sheet #frm');
   await page.fill('.sheet [name="name"]', 'Meu Nubank');
@@ -300,12 +343,15 @@ const guia = async (page) => {
 
   // Lançar sem conta nem cartão não pode estourar: tem de explicar e oferecer o passo.
   // Uma dívida cadastrada basta para o Painel sair do estado vazio sem criar origem.
+  // Zerar conta reabriria o tour obrigatório (ele exige pelo menos uma) — não é
+  // o que este bloco testa, então tira o documento do tour de propósito.
   await page.evaluate(async () => {
     const { commit } = await import('./src/ui/app.js');
     await commit((d) => {
       d.cards = [];
       d.accounts = [];
       d.debts = [{ id: 'dv1', name: 'Teste', kind: 'overdraft', balanceCents: 100000, monthlyRate: 0.08 }];
+      delete d.profile.onboarding;
     });
   });
   await page.evaluate(() => { location.hash = '#painel'; });
@@ -360,6 +406,9 @@ const guia = async (page) => {
   await page.evaluate(async () => {
     const { commit } = await import('./src/ui/app.js');
     await commit((d) => {
+      // Zera o que o tour obrigatório deixou (uma renda de teste) para o
+      // total abaixo continuar exato — mantém a conta, que o gate exige.
+      d.recurring = [];
       d.accounts.push({ id: 'ac', name: 'Conta', type: 'checking', balanceCents: 0 });
       d.recurring.push({ id: 'r1', label: 'Totvs', kind: 'income', amountCents: 470000, dayOfMonth: 7, fixed: true });
       d.recurring.push({ id: 'r2', label: 'Aluguel', kind: 'expense', amountCents: 90000, dayOfMonth: 10, categoryId: 'moradia' });
@@ -463,6 +512,8 @@ const guia = async (page) => {
   await page.waitForSelector('.sheet #frm');
   await page.fill('.sheet [name="description"]', 'Sofá');
   await digitar('.sheet [name="valor"]', '120000');
+  // Parcelas só existe pagando no crédito — escolhe o cartão pra ela aparecer.
+  await page.selectOption('.sheet [name="origem"]', { label: 'Teste — crédito' });
   await page.fill('.sheet [name="count"]', '900');
   await page.click('.sheet button[type="submit"]');
   await page.waitForTimeout(900);
@@ -489,6 +540,9 @@ const guia = async (page) => {
     const { today } = await import('./src/core/dates.js');
     const hoje = today();
     await commit((d) => {
+      // Zera a renda de teste que o tour obrigatório deixou, para o total
+      // abaixo bater exato.
+      d.recurring = [];
       d.recurring.push({ id: 'r1', label: 'Totvs', kind: 'income', amountCents: 470000, dayOfMonth: 7, fixed: true });
       d.transactions.push({ id: 't1', date: hoje, competence: hoje.slice(0, 7),
         description: 'Cr7', amountCents: 2000, extraordinary: true, method: 'pix' });

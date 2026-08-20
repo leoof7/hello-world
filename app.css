@@ -372,6 +372,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .field input:focus, .field select:focus { outline: 2px solid var(--jade); outline-offset: 1px; }
+.seg { display: flex; gap: 8px; }
+.seg-opt {
+  flex: 1; padding: 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink); font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.seg-opt.on { border-color: var(--jade); background: var(--jade); color: var(--on-jade); }
 .words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0; }
 .word { background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 10px 8px; text-align: center; }
 .word .i { font-size: 9px; color: var(--faint); font-family: 'IBM Plex Mono', monospace; }

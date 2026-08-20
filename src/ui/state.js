@@ -71,6 +71,15 @@ export function derive(doc, todayISO = today()) {
   const fixosCents = sum(
     (doc.recurring || []).filter((r) => r.kind === 'expense').map((r) => Math.abs(r.amountCents))
   );
+  // Só os gastos fixos que são essenciais — moradia, contas — servem de base
+  // para o custo mínimo enquanto não há 3 meses de histórico. Assinatura e
+  // outros fixos não essenciais não entram: custo mínimo é só o que não dá
+  // pra cortar.
+  const fixosEssenciaisCents = sum(
+    (doc.recurring || [])
+      .filter((r) => r.kind === 'expense' && catById[r.categoryId]?.essential)
+      .map((r) => Math.abs(r.amountCents))
+  );
   const parcelasDoMesCents = muro[0]?.cents || 0;
 
   // Quanto realmente sobra. Somar só os fixos cadastrados mente para cima:
@@ -110,6 +119,8 @@ export function derive(doc, todayISO = today()) {
     incomeCents: rendaFixaCents + extrasMesCents,
     savedCents: guardadoCents,
     todayISO,
+    minimumCostManualCents: doc.profile?.minimumCostCents || 0,
+    minimumCostFixedCents: fixosEssenciaisCents,
   });
 
   // ---- fila de revisão ----
@@ -307,8 +318,8 @@ export function guiaStatus(doc) {
     { id: 'cartoes', label: 'Cartões e contas', where: 'em Cartões', hint: 'fechamento, vencimento e limite de cada um', go: 'cartoes', done: doc.cards.length > 0 && doc.accounts.length > 0 },
     { id: 'dividas', label: 'Dívidas e taxas', where: 'em Dívidas', hint: 'o juro vem escrito na fatura e no extrato', go: 'dividas', done: doc.debts.length > 0 },
     { id: 'fixos', label: 'Renda e gastos fixos', where: 'em Tudo', hint: 'salário, aluguel, luz, internet, assinaturas', go: 'tudo', done: (doc.recurring || []).length >= 2 },
-    { id: 'tetos', label: 'Tetos por categoria', where: 'em Análise', hint: 'quanto pode gastar em cada coisa', go: 'analise', done: Object.keys(doc.budgets || {}).length > 0 },
-    { id: 'custo', label: 'Custo de vida mínimo', where: 'em Análise', hint: 'só o que não dá pra cortar. É a base de tudo', go: 'analise', done: (doc.profile?.minimumCostCents || 0) > 0 },
+    { id: 'tetos', label: 'Tetos por categoria', where: 'em Saúde', hint: 'quanto pode gastar em cada coisa', go: 'analise', done: Object.keys(doc.budgets || {}).length > 0 },
+    { id: 'custo', label: 'Custo de vida mínimo', where: 'em Saúde', hint: 'só o que não dá pra cortar. É a base de tudo', go: 'analise', done: (doc.profile?.minimumCostCents || 0) > 0 },
     { id: 'cofrinhos', label: 'Criar seus cofrinhos', where: 'em Tudo', hint: 'comece só pela reserva de emergência', go: 'cofrinhos', done: (doc.goals || []).length > 0 },
     { id: 'backup', label: 'Primeiro backup', where: 'em Tudo', hint: 'sem servidor, o backup é você quem faz', go: 'tudo', done: !!doc.profile?.backupFeito },
   ];

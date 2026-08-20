@@ -13,7 +13,7 @@ import { totalBalance, totalMonthlyInterest } from './debts.js';
  * É a base de tudo — reserva de emergência, quanto dá pra gastar sem culpa,
  * e quanto tempo você aguentaria sem renda.
  */
-export function minimumCostOfLiving(transactions, categories, todayISO, { months = 6 } = {}) {
+export function minimumCostOfLiving(transactions, categories, todayISO, { months = 6, manualCents = 0, fixedEssentialCents = 0 } = {}) {
   const essenciais = new Set(categories.filter((c) => c.essential).map((c) => c.id));
   const desde = addMonthKey(monthKey(todayISO), -months);
   const porMes = new Map();
@@ -27,12 +27,22 @@ export function minimumCostOfLiving(transactions, categories, todayISO, { months
   }
 
   const valores = [...porMes.values()];
-  if (!valores.length) return { cents: 0, months: 0, confident: false };
+  // Sem histórico ainda, o app não pode inventar "R$ 0". Prefere somar os
+  // gastos fixos essenciais já cadastrados (moradia, contas) — isso já existe
+  // no app e atualiza sozinho quando a pessoa cadastra um gasto fixo. Só cai
+  // pro número digitado no Perfil se não houver nem isso.
+  if (!valores.length) {
+    if (fixedEssentialCents > 0) return { cents: fixedEssentialCents, months: 0, confident: false, source: 'fixos' };
+    return manualCents > 0
+      ? { cents: manualCents, months: 0, confident: false, source: 'manual' }
+      : { cents: 0, months: 0, confident: false, source: 'histórico' };
+  }
 
   return {
     cents: Math.round(sum(valores) / valores.length),
     months: valores.length,
     confident: valores.length >= 3,
+    source: 'histórico',
     byMonth: [...porMes.entries()].sort(),
   };
 }
@@ -111,9 +121,10 @@ export function netWorth(accounts, debts) {
  * Monta o diagnóstico completo. Cada item carrega a explicação de como foi
  * calculado, porque indicador que não se explica não muda comportamento.
  */
-export function diagnose({ transactions, categories, accounts, debts, incomeCents, savedCents, todayISO }) {
+export function diagnose({ transactions, categories, accounts, debts, incomeCents, savedCents, todayISO, minimumCostManualCents = 0, minimumCostFixedCents = 0 }) {
   const mes = monthKey(todayISO);
-  const custoMinimo = minimumCostOfLiving(transactions, categories, todayISO);
+  const custoMinimo = minimumCostOfLiving(transactions, categories, todayISO,
+    { manualCents: minimumCostManualCents, fixedEssentialCents: minimumCostFixedCents });
   const gastoMes = sum(
     transactions
       .filter((t) => t.amountCents < 0 && (t.competence || monthKey(t.date)) === mes)

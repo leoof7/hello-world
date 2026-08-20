@@ -80,7 +80,7 @@ function aplicarMascaras(card) {
  * Abre uma folha com campos e devolve os valores, ou null se cancelar.
  * Campo de dinheiro entra e sai em centavos — nunca em ponto flutuante.
  */
-function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
+function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = null } = {}) {
   const corpo = campos.map((c) => {
     const id = `f-${c.name}`;
     if (c.type === 'select') {
@@ -88,6 +88,14 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
         <select id="${id}" name="${c.name}">
           ${c.options.map((o) => `<option value="${esc(o.value)}" ${String(o.value) === String(c.value ?? '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
         </select>${c.hint ? `<span style="font-size:11px;color:var(--muted)">${esc(c.hint)}</span>` : ''}</div>`;
+    }
+    if (c.type === 'segmento') {
+      return `<div class="field"><label>${esc(c.label)}</label>
+        <div class="seg">
+          ${c.options.map((o) => `<button type="button" class="seg-opt ${String(o.value) === String(c.value) ? 'on' : ''}" data-seg-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}
+        </div>
+        <input type="hidden" name="${c.name}" value="${esc(c.value ?? '')}">
+      </div>`;
     }
     if (c.type === 'checkbox') {
       return `<div class="field" style="flex-direction:row;align-items:center;gap:10px">
@@ -97,6 +105,11 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
     if (c.type === 'nota') {
       return `<p style="font-size:12px;color:var(--muted);line-height:1.6;margin:18px 0 12px;
         padding-top:14px;border-top:1px solid var(--line-2)">${esc(c.label)}</p>`;
+    }
+    if (c.type === 'display') {
+      return `<div class="field"><label>${esc(c.label)}</label>
+        <div style="background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:13px 14px;color:var(--muted);font-size:16px">${esc(c.value)}</div>
+        ${c.hint ? `<span style="font-size:11px;color:var(--muted)">${esc(c.hint)}</span>` : ''}</div>`;
     }
     if (c.type === 'textarea') {
       return `<div class="field"><label for="${id}">${esc(c.label)}</label>
@@ -136,11 +149,25 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
         aplicarMascaras(card);
         card.querySelector('[data-x]').onclick = () => fechar(null);
         card.querySelector('[data-del]')?.addEventListener('click', () => fechar({ __apagar: true }));
+
+        for (const grupo of card.querySelectorAll('.seg')) {
+          const escondido = grupo.parentElement.querySelector('input[type="hidden"]');
+          grupo.addEventListener('click', (ev) => {
+            const botao = ev.target.closest('.seg-opt');
+            if (!botao) return;
+            grupo.querySelectorAll('.seg-opt').forEach((b) => b.classList.toggle('on', b === botao));
+            escondido.value = botao.dataset.segValue;
+            escondido.dispatchEvent(new Event('change'));
+          });
+        }
+
+        aoMontar?.(card);
+
         card.querySelector('#frm').onsubmit = (ev) => {
           ev.preventDefault();
           const out = {};
           for (const c of campos) {
-            if (c.type === 'nota') continue;
+            if (c.type === 'nota' || c.type === 'display') continue;
             const el = card.querySelector(`[name="${c.name}"]`);
             if (c.type === 'money') out[c.name] = toCents(el.value);
             else if (c.type === 'number') {
@@ -269,6 +296,14 @@ const ACOES = {
       if (r.sempre && r.categoryId) d.memory = learn(d.memory || {}, tx, { categoryId: r.categoryId });
     });
     toast(r.sempre ? 'Categorizado — não pergunto de novo.' : 'Categorizado.');
+  },
+
+  // ---- antes de começar ----
+  async 'pular-onboarding'({ id }) {
+    await commit((d) => {
+      d.profile.onboarding = d.profile.onboarding || { done: false, steps: {} };
+      d.profile.onboarding.steps[id] = 'pulado';
+    });
   },
 
   // ---- contas e cartões ----
@@ -448,9 +483,10 @@ const ACOES = {
     const p = app.doc.profile;
     const r = await form('Seu perfil', null, [
       { name: 'name', label: 'Nome', type: 'text', value: p.name },
-      { name: 'incomeCents', label: 'Renda mensal', type: 'money', value: p.incomeCents },
+      { name: 'rendaInfo', label: 'Renda mensal', type: 'display', value: brl(app.view.rendaFixaCents),
+        hint: 'soma dos recebimentos fixos cadastrados em Tudo → Recebimentos. Edite lá para mudar.' },
       { name: 'minimumCostCents', label: 'Custo de vida mínimo', type: 'money', value: p.minimumCostCents,
-        hint: 'só o que não dá para cortar. A Análise calcula sozinha com 3 meses de histórico' },
+        hint: 'só preencha se não tiver gastos fixos essenciais cadastrados — a Saúde já soma Moradia, Contas da casa etc. sozinha' },
       { name: 'emergencyTargetMonths', label: 'Meses de reserva desejados', type: 'number', value: p.emergencyTargetMonths || 6,
         min: 1, max: 24, hint: 'entre 1 e 24. Três a seis é o mais comum' },
     ]);
@@ -737,24 +773,65 @@ async function editarLancamento(id, sugestao = {}) {
     return;
   }
 
-  const origemAtual = tx?.cardId ? `cd:${tx.cardId}` : tx?.accountId ? `ac:${tx.accountId}` : opcoesOrigem()[0]?.value;
-  const entrada = sugestao.entrada ?? (tx ? tx.amountCents > 0 : false);
+  // Débito e crédito nunca se confundem porque são coisas diferentes no
+  // modelo: "onde" já É a resposta — conta é débito, cartão é crédito. O que
+  // faltava era deixar isso escrito, e parar de pedir parcelas ou "entrada
+  // avulsa" quando isso não faz sentido pro que está sendo lançado agora.
+  const opcoesOrigemSaida = () => [
+    ...app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: `${a.name} — débito` })),
+    ...app.doc.cards.map((c) => ({ value: `cd:${c.id}`, label: `${c.name} — crédito` })),
+  ];
+  const opcoesOrigemEntrada = () => app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: a.name }));
+
+  const entradaInicial = sugestao.entrada ?? (tx ? tx.amountCents > 0 : false);
+  const origemAtual = tx?.cardId ? `cd:${tx.cardId}`
+    : tx?.accountId ? `ac:${tx.accountId}`
+    : (entradaInicial ? opcoesOrigemEntrada() : opcoesOrigemSaida())[0]?.value;
 
   const r = await form(
-    tx ? 'Editar lançamento' : entrada ? 'Novo recebimento' : 'Novo lançamento',
+    tx ? 'Editar lançamento' : entradaInicial ? 'Novo recebimento' : 'Novo lançamento',
     null,
     [
+      { name: 'entrada', label: 'Tipo', type: 'segmento', value: entradaInicial ? 'entrada' : 'saida',
+        options: [{ value: 'saida', label: 'Saída' }, { value: 'entrada', label: 'Entrada' }] },
       { name: 'description', label: 'O que foi', type: 'text', value: tx?.description ?? sugestao.description ?? '', placeholder: 'Pão de Açúcar' },
       { name: 'valor', label: 'Valor', type: 'money', value: Math.abs(tx?.amountCents ?? sugestao.amountCents ?? 0) },
-      { name: 'entrada', label: 'É dinheiro entrando', type: 'checkbox', value: entrada },
       { name: 'date', label: 'Quando', type: 'date', value: tx?.date ?? sugestao.date ?? app.todayISO },
-      { name: 'origem', label: 'Onde', type: 'select', value: origemAtual, options: opcoesOrigem() },
+      { name: 'origem', label: entradaInicial ? 'Entrou onde' : 'Onde — débito ou crédito', type: 'select',
+        value: origemAtual, options: entradaInicial ? opcoesOrigemEntrada() : opcoesOrigemSaida() },
       { name: 'categoryId', label: 'Categoria', type: 'select', value: tx?.categoryId ?? sugestao.categoryId ?? '', options: opcoesCategoria() },
       { name: 'count', label: 'Parcelas', type: 'number', value: sugestao.count || 1, min: 1, max: 48,
-        hint: '1 para à vista. Vale só para cartão de crédito, até 48x.' },
+        hint: '1 para à vista. Só existe pagando no crédito.' },
       { name: 'extraordinary', label: 'Entrada avulsa (trader, serviço por fora)', type: 'checkbox', value: tx?.extraordinary ?? sugestao.extraordinary ?? false },
     ],
-    { ok: tx ? 'Salvar' : 'Lançar', apagar: tx ? 'Apagar lançamento' : null }
+    {
+      ok: tx ? 'Salvar' : 'Lançar',
+      apagar: tx ? 'Apagar lançamento' : null,
+      aoMontar: (card) => {
+        const hiddenEntrada = card.querySelector('[name="entrada"]');
+        const campoOrigem = card.querySelector('#f-origem');
+        const rotuloOrigem = card.querySelector('label[for="f-origem"]');
+        const linhaParcelas = card.querySelector('[name="count"]').closest('.field');
+        const linhaAvulsa = card.querySelector('[name="extraordinary"]').closest('.field');
+
+        const atualizar = () => {
+          const ehEntrada = hiddenEntrada.value === 'entrada';
+          const opcoes = ehEntrada ? opcoesOrigemEntrada() : opcoesOrigemSaida();
+          const atual = campoOrigem.value;
+          campoOrigem.innerHTML = opcoes.map((o) =>
+            `<option value="${esc(o.value)}" ${o.value === atual ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+          if (!opcoes.some((o) => o.value === atual)) campoOrigem.value = opcoes[0]?.value || '';
+          rotuloOrigem.textContent = ehEntrada ? 'Entrou onde' : 'Onde — débito ou crédito';
+          const cartaoEscolhido = !ehEntrada && campoOrigem.value.startsWith('cd:');
+          linhaParcelas.style.display = cartaoEscolhido ? '' : 'none';
+          linhaAvulsa.style.display = ehEntrada ? '' : 'none';
+        };
+
+        hiddenEntrada.addEventListener('change', atualizar);
+        campoOrigem.addEventListener('change', atualizar);
+        atualizar();
+      },
+    }
   );
   if (!r) return;
 
@@ -766,14 +843,15 @@ async function editarLancamento(id, sugestao = {}) {
 
   if (!r.valor) { toast('Faltou o valor.'); return; }
 
+  const entradaFinal = r.entrada === 'entrada';
   const [tipo, origemId] = r.origem.split(':');
   const cardId = tipo === 'cd' ? origemId : null;
   const accountId = tipo === 'ac' ? origemId : null;
-  const sinal = r.entrada ? 1 : -1;
+  const sinal = entradaFinal ? 1 : -1;
 
   // Parcelamento é caso à parte: uma compra vira N lançamentos, cada um na sua
   // fatura. Sem isso a projeção mente.
-  if (!r.entrada && cardId && r.count > 1) {
+  if (!entradaFinal && cardId && r.count > 1) {
     const card = app.doc.cards.find((c) => c.id === cardId);
     const grupo = novoId('cp');
     const parcelas = expand(
@@ -798,7 +876,7 @@ async function editarLancamento(id, sugestao = {}) {
     cardId,
     accountId,
     method: cardId ? 'credit' : tx?.method || null,
-    extraordinary: r.entrada && r.extraordinary,
+    extraordinary: entradaFinal && r.extraordinary,
   };
 
   if (cardId) {
@@ -1065,9 +1143,15 @@ async function editarRecorrente(id, kind) {
 /**
  * A folha do lançamento por frase.
  *
- * O ditado por voz só aparece onde o navegador tem `SpeechRecognition` — e o
- * Safari do iPhone não tem. Em vez de prometer um microfone que não funciona,
- * ali o app explica que o ditado do teclado do iOS faz o mesmo trabalho.
+ * O botão de ditado aparece sempre que o navegador expõe `SpeechRecognition`
+ * — inclusive no Safari do iPhone em versões recentes. Mas o reconhecimento
+ * do Safari é instável: às vezes concede a permissão e nunca dispara
+ * `onresult` nem `onerror`, o que travava o botão em "ouvindo…" para sempre e
+ * só saía apagando a permissão de áudio na mão, no Ajustes do iPhone. Por
+ * isso: `interimResults` liga para mostrar o texto sendo reconhecido ao vivo
+ * (a pessoa vê que está ouvindo de verdade, não só confia num rótulo), o
+ * próprio botão vira "Parar" enquanto ouve — tocar de novo encerra na hora —
+ * e um tempo limite força o reset mesmo se nada disso disparar.
  */
 function pedirFrase() {
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1081,7 +1165,7 @@ function pedirFrase() {
        <textarea id="fr-nl" rows="2" placeholder="gastei 85 no mercado ontem"></textarea>
        <span style="font-size:11px;color:var(--muted)">${Reconhecimento
         ? 'Ou toque no microfone abaixo para ditar.'
-        : 'Para ditar no iPhone: toque no microfone do próprio teclado. O Safari não dá ao app acesso ao reconhecimento de voz.'}</span>
+        : 'Para ditar no iPhone: toque no microfone do próprio teclado. Este navegador não dá ao app acesso ao reconhecimento de voz.'}</span>
      </div>
      ${Reconhecimento ? `<div class="btns"><button class="btn ghost" data-mic="1" style="width:100%">${icon('microfone')} Ditar</button></div>` : ''}
      <div class="btns"><button class="btn primary" data-ok="1">Interpretar</button>
@@ -1092,14 +1176,51 @@ function pedirFrase() {
         card.querySelector('[data-x]').onclick = () => fechar(null);
         card.querySelector('[data-ok]').onclick = () => fechar(campo.value.trim() || null);
 
-        card.querySelector('[data-mic]')?.addEventListener('click', (ev) => {
+        const botaoMic = card.querySelector('[data-mic]');
+        botaoMic?.addEventListener('click', (ev) => {
+          const botao = ev.target.closest('button');
+
+          // Já está ouvindo: o toque agora é "parar", não começar de novo.
+          if (botao.dataset.ouvindo) {
+            try { botao._rec?.stop(); } catch { /* já parado */ }
+            return;
+          }
+
           const rec = new Reconhecimento();
+          botao._rec = rec;
           rec.lang = 'pt-BR';
-          rec.interimResults = false;
+          rec.interimResults = true;
+
+          let resolvido = false;
+          const encerrar = () => {
+            if (resolvido) return;
+            resolvido = true;
+            clearTimeout(tempoLimite);
+            delete botao.dataset.ouvindo;
+            botao._rec = null;
+            botao.innerHTML = `${icon('microfone')} Ditar`;
+          };
+          const tempoLimite = setTimeout(() => {
+            try { rec.stop(); } catch { /* já parado */ }
+            encerrar();
+            toast('Não consegui ouvir a tempo. Digite a frase.');
+          }, 12000);
+
+          // Interim ou final, mostra o que já reconheceu — assim dá para ver
+          // que o microfone está de fato captando, em vez de confiar cego
+          // num rótulo "ouvindo…" que pode estar travado por trás.
           rec.onresult = (e) => { campo.value = e.results[0][0].transcript; };
           rec.onerror = () => toast('Não consegui ouvir. Digite a frase.');
-          try { rec.start(); ev.target.closest('button').textContent = 'ouvindo…'; }
-          catch { toast('O microfone não está disponível aqui.'); }
+          rec.onend = encerrar;
+
+          try {
+            rec.start();
+            botao.dataset.ouvindo = '1';
+            botao.innerHTML = `${icon('microfone')} Toque para parar`;
+          } catch {
+            encerrar();
+            toast('O microfone não está disponível aqui.');
+          }
         });
       },
     }
