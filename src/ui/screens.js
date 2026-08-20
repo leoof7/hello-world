@@ -587,13 +587,14 @@ function historicoBarras(meses) {
   const media = fechados.length ? Math.round(fechados.reduce((a, b) => a + b.cents, 0) / fechados.length) : 0;
   return `<div style="display:flex;align-items:flex-end;gap:6px;height:110px">
     ${meses.map((b) => `
-      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%">
+      <button data-act="ver-mes" data-month="${esc(b.month)}"
+        style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%;background:none;border:0;padding:0;cursor:pointer">
         <div style="width:100%;border-radius:5px 5px 2px 2px;background:${b.aberto ? 'var(--line)' : b.cents ? 'var(--blue)' : 'var(--line)'};
              height:${Math.max(3, (b.cents / maior) * 78)}%" title="${esc(brl(b.cents))}${b.aberto ? ' · mês em aberto' : ''}"></div>
         <span style="font-size:8.5px;color:var(--muted);letter-spacing:.03em">${monthAbbr(b.month).slice(0, 3)}</span>
-      </div>`).join('')}
+      </button>`).join('')}
   </div>
-  <div class="ft"><span style="font-size:10.5px;color:var(--muted)">últimos ${meses.length} meses</span>
+  <div class="ft"><span style="font-size:10.5px;color:var(--muted)">últimos ${meses.length} meses · toque num mês pra abrir</span>
     <span style="font-size:10.5px;color:var(--muted)">média ${m(media, brlShort)}/mês</span></div>`;
 }
 
@@ -1096,6 +1097,7 @@ function cofrinho(g) {
       <span class="num" style="font-size:12px">${m(g.savedCents, brlShort)} de ${m(g.targetCents, brlShort)}</span>
       <span style="font-size:11px;color:var(--muted)">${g.monthlyCents ? `${m(g.monthlyCents, brlShort)}/mês` : 'parado'}</span>
     </div>
+    <button class="btn ghost" data-act="depositar-cofrinho" data-id="${esc(g.id)}" style="width:100%;margin-top:10px;padding:9px">${icon('mais')} Depositar</button>
   </div>`;
 }
 

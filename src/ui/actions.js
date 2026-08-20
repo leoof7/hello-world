@@ -6,7 +6,7 @@
 
 import { app, commit, go, draw } from './app.js';
 import { toCents, brl, formatCents, sum } from '../core/money.js';
-import { monthKey, formatShort } from '../core/dates.js';
+import { monthKey, formatShort, formatMonthKey } from '../core/dates.js';
 import { parseEntry } from '../core/parse.js';
 import { expand } from '../core/installments.js';
 import { learn } from '../core/categorize.js';
@@ -428,6 +428,7 @@ const ACOES = {
   // ---- cofrinhos ----
   async 'novo-cofrinho'() { await editarCofrinho(null); },
   async 'editar-cofrinho'({ id }) { await editarCofrinho(id); },
+  async 'depositar-cofrinho'({ id }) { await depositarCofrinho(id); },
   async 'novo-bem'() { await editarBem(null); },
   async 'editar-bem'({ id }) { await editarBem(id); },
 
@@ -466,6 +467,32 @@ const ACOES = {
       if (r === 'novo') return editarRecorrente(null, 'expense');
       if (r) return editarRecorrente(r, 'expense');
     });
+  },
+
+  async 'ver-mes'({ month }) {
+    const catById = Object.fromEntries(app.doc.categories.map((c) => [c.id, c]));
+    const porCategoria = new Map();
+    for (const t of app.doc.transactions) {
+      if (t.amountCents >= 0) continue;
+      const comp = t.competence || monthKey(t.date);
+      if (comp !== month) continue;
+      const nome = catById[t.categoryId]?.name || 'Sem categoria';
+      porCategoria.set(nome, (porCategoria.get(nome) || 0) + Math.abs(t.amountCents));
+    }
+    const linhas = [...porCategoria.entries()].sort((a, b) => b[1] - a[1]);
+    const total = sum(linhas.map((l) => l[1]));
+
+    await sheet(
+      `<h4>${esc(formatMonthKey(month, { long: true }))}</h4>
+       <p class="sub">${esc(brl(total))} gastos no mês, por categoria.</p>
+       ${linhas.length ? `<div class="list">${linhas.map(([nome, cents]) => `
+         <div class="row">
+           <div class="bd"><div class="t">${esc(nome)}</div></div>
+           <div class="rt"><div class="amt num">${esc(brl(cents))}</div></div>
+         </div>`).join('')}</div>` : '<div class="empty">Nenhum gasto categorizado nesse mês.</div>'}
+       <div class="btns"><button class="btn ghost" data-x="1" style="width:100%">Fechar</button></div>`,
+      { onMount: (card, fechar) => { card.querySelector('[data-x]').onclick = () => fechar(null); } }
+    );
   },
 
   async tetos() {
@@ -512,13 +539,34 @@ const ACOES = {
   },
 
   async projetos() {
-    const r = await form('Projetos de vida',
-      'Um projeto junta várias categorias para você ver o custo real de uma coisa — "quanto o carro me custa" soma combustível, seguro, manutenção e IPVA.',
-      [{ name: 'nome', label: 'Nome do projeto', type: 'text', placeholder: 'Carro' }],
-      { ok: 'Criar' });
-    if (!r?.nome) return;
-    await commit((d) => { d.projects.push({ id: novoId('pj'), name: r.nome, categoryIds: [] }); });
-    toast('Projeto criado. Escolha as categorias ao editar um lançamento.');
+    const custoProjeto = (p) => sum(
+      app.doc.transactions
+        .filter((t) => t.amountCents < 0 && p.categoryIds.includes(t.categoryId))
+        .map((t) => Math.abs(t.amountCents))
+    );
+
+    const r = await sheet(
+      `<h4>Projetos de vida</h4>
+       <p class="sub">Junta categorias pra ver o custo real de uma coisa — "quanto o carro me custa" soma combustível, seguro, manutenção e IPVA.</p>
+       ${app.doc.projects.length ? `<div class="list">${app.doc.projects.map((p) => `
+         <button class="row" data-item="${esc(p.id)}">
+           <div class="ic">${icon('carro')}</div>
+           <div class="bd"><div class="t">${esc(p.name)}</div>
+             <div class="s">${p.categoryIds.length} ${p.categoryIds.length === 1 ? 'categoria' : 'categorias'}</div></div>
+           <div class="rt"><div class="amt num">${brl(custoProjeto(p))}</div></div>
+         </button>`).join('')}</div>` : '<div class="empty">Nenhum projeto ainda.</div>'}
+       <div class="btns"><button class="btn primary" data-novo="1">${icon('mais')} Novo projeto</button>
+         <button class="btn ghost" data-x="1">Fechar</button></div>`,
+      {
+        onMount: (card, fechar) => {
+          card.querySelector('[data-x]').onclick = () => fechar(null);
+          card.querySelector('[data-novo]').onclick = () => fechar('novo');
+          card.querySelectorAll('[data-item]').forEach((b) => { b.onclick = () => fechar(b.dataset.item); });
+        },
+      }
+    );
+    if (r === 'novo') return editarProjeto(null);
+    if (r) return editarProjeto(r);
   },
 
   async perfil() {
@@ -1299,6 +1347,53 @@ async function editarCofrinho(id) {
   };
   await commit((d) => {
     d.goals = id ? d.goals.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.goals, registro];
+  });
+  toast('Salvo.');
+}
+
+/** Soma (ou tira) um valor do já guardado, sem precisar reabrir o cofrinho inteiro pra editar o número. */
+async function depositarCofrinho(id) {
+  const g = app.doc.goals.find((x) => x.id === id);
+  if (!g) return;
+
+  const r = await form(`Depositar em ${g.name}`,
+    `Tem ${brl(g.savedCents)} guardado. Digite o valor — toque em "Foi saída" se está tirando, não colocando.`,
+    [
+      { name: 'valor', label: 'Valor', type: 'money', value: 0 },
+      { name: 'saida', label: 'Foi saída (tirei do cofrinho)', type: 'checkbox', value: false },
+    ], { ok: 'Registrar' });
+  if (!r || !r.valor) return;
+
+  const novoSaldo = Math.max(0, g.savedCents + (r.saida ? -1 : 1) * Math.abs(r.valor));
+  await commit((d) => {
+    const alvo = d.goals.find((x) => x.id === id);
+    if (alvo) alvo.savedCents = novoSaldo;
+  });
+  toast(`${g.name}: ${brl(novoSaldo)} guardado.`);
+}
+
+async function editarProjeto(id) {
+  const p = id ? app.doc.projects.find((x) => x.id === id) : null;
+  const categorias = app.doc.categories.filter((c) => c.id !== 'renda');
+
+  const r = await form(p ? 'Editar projeto' : 'Novo projeto',
+    'Marque as categorias que fazem parte desse projeto — é a soma delas que vira o custo real.',
+    [
+      { name: 'name', label: 'Nome do projeto', type: 'text', value: p?.name || '', placeholder: 'Carro' },
+      ...categorias.map((c) => ({ name: `cat_${c.id}`, label: c.name, type: 'checkbox', value: p?.categoryIds?.includes(c.id) || false })),
+    ], { ok: 'Salvar', apagar: p ? 'Apagar projeto' : null });
+  if (!r) return;
+
+  if (r.__apagar) {
+    await commit((d) => { d.projects = d.projects.filter((x) => x.id !== id); });
+    toast('Projeto apagado.');
+    return;
+  }
+
+  const categoryIds = categorias.filter((c) => r[`cat_${c.id}`]).map((c) => c.id);
+  const registro = { id: id || novoId('pj'), name: r.name || 'Projeto', categoryIds };
+  await commit((d) => {
+    d.projects = id ? d.projects.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.projects, registro];
   });
   toast('Salvo.');
 }

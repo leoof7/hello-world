@@ -110,11 +110,13 @@ export function derive(doc, todayISO = today()) {
   // ---- orçamento ----
   const comTeto = categorias.map((c) => ({ ...c, limitCents: doc.budgets?.[c.id] || 0 }));
   const orcamento = monthStatus(comTeto, doc.transactions, todayISO);
-  const orcamentoGeral = orcamento.length ? overall(orcamento, todayISO) : null;
   // Teto é pra gasto que varia. Categoria fixa (Moradia, Contas da casa...) tem
   // valor e dia certos vindos de Gastos fixos — vira lista informativa em vez
-  // de barra de progresso presa em "R$ 0 gasto" pra sempre.
+  // de barra de progresso presa em "R$ 0 gasto" pra sempre. O resumo geral
+  // também não pode somar teto de categoria fixa — contava um número que não
+  // tinha mais barra nenhuma pra explicar de onde vinha.
   const orcamentoVariavel = orcamento.filter((c) => !c.fixed);
+  const orcamentoGeral = orcamentoVariavel.length ? overall(orcamentoVariavel, todayISO) : null;
   const gastoFixoPorCategoria = new Map();
   for (const r of doc.recurring || []) {
     if (r.kind !== 'expense' || !r.categoryId) continue;
@@ -263,7 +265,7 @@ export function statementsOf(doc, todayISO = today()) {
     if (!t.cardId) continue;
     const card = cardById[t.cardId];
     if (!card) continue;
-    const ciclo = t.cycleId ? { id: t.cycleId, dueDate: t.dueDate } : cycleFor(card, t.date);
+    const ciclo = t.cycleId ? { id: t.cycleId } : cycleFor(card, t.date);
     const chave = `${card.id}|${ciclo.id}`;
     const g = grupos.get(chave) || {
       id: chave,
@@ -271,7 +273,10 @@ export function statementsOf(doc, todayISO = today()) {
       cardName: card.name,
       cycleId: ciclo.id,
       closeDate: ciclo.id,
-      dueDate: ciclo.dueDate || dueDateOf(card, ciclo.id),
+      // Recalcula sempre do cartão de hoje, nunca confia no dueDate gravado
+      // no lançamento — editar o dia de vencimento do cartão não pode deixar
+      // fatura antiga presa na data velha.
+      dueDate: dueDateOf(card, ciclo.id),
       totalCents: 0,
       items: [],
     };
