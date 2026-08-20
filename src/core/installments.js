@@ -38,7 +38,9 @@ export function expand(purchase, card, { remainder = 'first' } = {}) {
       cardId: card.id,
       description: purchase.description,
       categoryId: purchase.categoryId,
-      projectId: purchase.projectId,
+      // Só emite `projectId` quando existe: chave com `undefined` desaparece no
+      // JSON, e aí o documento salvo deixa de ser igual ao que está na memória.
+      ...(purchase.projectId ? { projectId: purchase.projectId } : {}),
       amountCents: values[i],
       // A primeira parcela tem a data real da compra; as seguintes usam o
       // fechamento do ciclo, que é quando elas de fato existem.
