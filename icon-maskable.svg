@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Maskable: o desenho fica dentro do círculo seguro de 80%, porque o
+       Android recorta a borda em forma variável. -->
+  <rect width="512" height="512" fill="#12151a"/>
+  <text x="50%" y="57%" text-anchor="middle" dominant-baseline="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-size="230" font-weight="400" fill="#f2f4f7">0</text>
+  <circle cx="342" cy="180" r="20" fill="#3ddc9a"/>
+</svg>
