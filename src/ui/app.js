@@ -34,7 +34,8 @@ export const app = {
   privacy: false,   // olho fechado esconde os valores
   todayISO: today(),
   backup: null,
-  atualizacao: null,  // service worker novo esperando para assumir
+  atualizacao: null,     // service worker novo esperando para assumir
+  pediuAtualizar: false, // a pessoa tocou em "instalar": pode recarregar
 };
 
 const TELAS = ['painel', 'cartoes', 'dividas', 'analise', 'tudo', 'cofrinhos', 'recebimentos', 'revisao', 'guia'];
@@ -562,13 +563,21 @@ async function cuidarDaVersao() {
     });
   });
 
-  // Troca de controlador → a versão nova assumiu; recarrega uma única vez.
-  // Só vale quando já havia uma versão rodando: ver o comentário acima.
+  // Troca de controlador → a versão nova assumiu.
+  //
+  // Recarregar na hora seria grosseiro: a pessoa está no meio de um lançamento
+  // e o app se reinicia sozinho, pedindo Face ID de novo. Então só recarrega
+  // quando isso não custa nada — se ela ainda não destravou o cofre, ou se foi
+  // ela mesma quem pediu a atualização. Caso contrário, a faixa espera.
   let recarregando = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!jaTinhaControlador || recarregando) return;
-    recarregando = true;
-    location.reload();
+    if (!app.doc || app.pediuAtualizar) {
+      recarregando = true;
+      location.reload();
+      return;
+    }
+    avisar(registro.active || registro.waiting);
   });
 
   // Procura versão nova ao abrir e sempre que o app volta do segundo plano,
@@ -583,14 +592,42 @@ async function cuidarDaVersao() {
 /** Instala a versão que está esperando. Chamado pelo aviso e por Segurança. */
 export async function instalarAtualizacao() {
   const registro = await navigator.serviceWorker?.getRegistration();
-  const esperando = app.atualizacao || registro?.waiting;
-  if (esperando) {
-    // o controllerchange acima recarrega assim que ela assumir
-    esperando.postMessage?.('pular-espera');
-    registro?.waiting?.postMessage?.('pular-espera');
+  if (!registro && !app.atualizacao) return false;
+
+  // Marca que o recarregamento foi pedido: só assim o controllerchange age.
+  app.pediuAtualizar = true;
+
+  const parado = registro?.waiting;
+  if (!parado) {
+    // Sem ninguém esperando, a versão nova já é a ativa e só falta a página
+    // recarregar para deixar de rodar os módulos velhos que estão na memória.
+    location.reload();
     return true;
   }
-  return false;
+
+  // A versão nova está instalada mas parada. Recarregar agora seria pior que
+  // não fazer nada: a página voltaria servida pelo service worker ANTIGO e a
+  // pessoa veria a mesma versão de novo, com a mesma faixa.
+  //
+  // O caminho educado é pedir que ele assuma. Só que `skipWaiting` nem sempre
+  // move um worker já parado, e "às vezes funciona" não serve para um botão
+  // que a pessoa tocou. Então: pede, espera pouco, e se ele não assumir, força
+  // pelo caminho que não depende de ninguém — jogar fora o cache, desregistrar
+  // e recarregar. Custa uma busca à rede, uma vez. Nada disso toca no cofre.
+  parado.postMessage?.('pular-espera');
+
+  const assumiu = await new Promise((resolve) => {
+    const pronto = () => resolve(true);
+    navigator.serviceWorker.addEventListener('controllerchange', pronto, { once: true });
+    setTimeout(() => {
+      navigator.serviceWorker.removeEventListener('controllerchange', pronto);
+      resolve(false);
+    }, 3000);
+  });
+
+  if (assumiu) return true;   // o controllerchange já recarrega
+  await forcarAtualizacao();
+  return true;
 }
 
 /** Último recurso: joga fora todo o cache do programa e recarrega. */
@@ -599,8 +636,10 @@ export async function forcarAtualizacao() {
     const chaves = await caches.keys();
     await Promise.all(chaves.map((k) => caches.delete(k)));
   }
-  const registro = await navigator.serviceWorker?.getRegistration();
-  await registro?.unregister().catch(() => {});
+  // De propósito NÃO desregistra o service worker. Sem ele, o recarregamento
+  // busca os módulos com o cache padrão do navegador — que devolve justamente
+  // a versão velha que estamos tentando trocar. Com ele no lugar e o cache
+  // vazio, cada arquivo é buscado com `no-cache` e vem fresco do servidor.
   location.reload();
 }
 

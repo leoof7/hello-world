@@ -15,10 +15,26 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Zero">
 
+  <link rel="stylesheet" href="./app.css">
+
+  <!--
+    As fontes carregam SEM bloquear a renderização.
+
+    Um `<link rel="stylesheet">` comum trava a pintura da página até responder.
+    Medido: quando o Google está lento ou bloqueado, isso são 14 segundos de
+    tela branca — num app cujos próprios arquivos somam 25 ms. Um app que roda
+    inteiro no seu aparelho não pode depender do Google para abrir.
+
+    O truque do `media="print"` faz o navegador baixar sem bloquear; o `onload`
+    promove para `all` quando chega. Até lá vale a pilha de fallback do CSS.
+  -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,300;6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" media="print" onload="this.media='all';this.onload=null"
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,300;6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <noscript>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,300;6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  </noscript>
 </head>
 <body>
   <div id="app" class="app">

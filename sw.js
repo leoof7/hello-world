@@ -1,21 +1,28 @@
 // Service worker.
 //
-// Estratégia: REDE PRIMEIRO para os arquivos do próprio app, cache primeiro só
-// para as fontes.
+// Estratégia: cache primeiro para servir, versão inteira trocada de uma vez
+// quando o conteúdo muda.
 //
-// A versão anterior fazia cache primeiro em tudo, e o resultado é que um app já
-// instalado nunca mais via uma atualização: o navegador servia o cache antigo
-// para sempre, e a única saída era apagar o site. Trocar uma constante a cada
-// publicação seria remédio frágil demais — bastava esquecer uma vez.
+// Duas tentativas anteriores erraram, cada uma para um lado:
 //
-// Com rede primeiro, quem está online sempre roda a versão publicada, e quem
-// está offline continua abrindo pelo cache. O custo é uma ida à rede na
-// abertura; para um app deste tamanho, é ruído.
+//   1. Cache primeiro com versão fixa. O app instalado nunca mais via uma
+//      atualização — servia o mesmo cache para sempre.
+//   2. Rede primeiro. Atualizava, mas custava uma revalidação por módulo: com
+//      ~30 arquivos, a abertura passou de instantânea para 13 segundos. Um app
+//      de finanças que demora 13 s para abrir não é usado.
+//
+// O que funciona é o meio: servir do cache (rápido, e offline funciona) e
+// trocar o cache INTEIRO quando o hash do conteúdo muda. A troca é atômica —
+// ou você está inteiramente na versão velha, ou inteiramente na nova. Meia
+// versão de um app que calcula dinheiro seria pior que versão velha.
+//
+// VERSAO é gravada por `npm run versionar` a partir do conteúdo dos arquivos,
+// e `npm test` falha se estiver velha. Não dá para publicar esquecendo.
 //
 // O cofre vive no IndexedDB e o service worker nem o enxerga. Nada aqui toca
 // nos seus dados.
 
-const VERSAO = 'v2';
+const VERSAO = '8a74276cc32b';
 const CACHE = `zero-${VERSAO}`;
 
 const ARQUIVOS = [
@@ -57,9 +64,17 @@ const ARQUIVOS = [
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE)
-      // addAll falha inteiro se um arquivo faltar; guardamos um a um para que
-      // um caminho errado não derrube a instalação toda.
-      .then((c) => Promise.all(ARQUIVOS.map((a) => c.add(a).catch(() => {}))))
+      .then((c) => Promise.all(ARQUIVOS.map((a) =>
+        // `no-cache` obriga a ir ao servidor: sem isso o cache HTTP do
+        // navegador devolve os arquivos velhos e a "versão nova" nasce igual à
+        // antiga. addAll falharia inteiro por um caminho errado, então cada
+        // arquivo entra por conta própria.
+        fetch(a, { cache: 'no-cache' })
+          .then((r) => (r.ok ? c.put(a, r) : null))
+          .catch(() => {})
+      )))
+      // Não espera todas as abas fecharem: o app trata a troca de controlador
+      // recarregando uma vez, e a troca do cache é atômica.
       .then(() => self.skipWaiting())
   );
 });
@@ -85,34 +100,23 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
 
-  const url = new URL(req.url);
-  const propria = url.origin === location.origin;
-
-  // Fontes e afins: cache primeiro. Elas não mudam, e assim o app abre offline
-  // com a tipografia certa.
-  if (!propria) {
-    e.respondWith(
-      caches.match(req).then((achado) =>
-        achado || fetch(req).then((r) => guardar(req, r)).catch(() => achado)
-      )
-    );
-    return;
-  }
-
-  // Arquivos do app: rede primeiro, cache como rede de segurança.
-  //
-  // O `cache: 'no-cache'` não é exagero — sem ele o "rede primeiro" é mentira:
-  // o cache HTTP do próprio navegador responde no lugar do servidor e devolve
-  // a versão antiga sem sequer perguntar. Com ele há revalidação: se o arquivo
-  // não mudou, o servidor responde 304 e não trafega nada.
+  // Cache primeiro, para tudo: é o que faz o app abrir instantaneamente e
+  // funcionar offline. A atualização não depende daqui — ela vem da troca de
+  // versão do próprio service worker, no `install` acima.
   e.respondWith(
-    fetch(req, { cache: 'no-cache' })
-      .then((r) => guardar(req, r))
-      .catch(async () =>
-        (await caches.match(req))
-        // Navegação offline sem a rota em cache ainda abre o app.
-        || (req.mode === 'navigate' ? await caches.match('./index.html') : undefined)
-      )
+    caches.match(req).then((achado) => {
+      if (achado) return achado;
+      // Cache vazio significa instalação nova ou "buscar atualização": os dois
+      // casos querem o arquivo do servidor, não a cópia velha que o cache HTTP
+      // do navegador guarda por conta própria. Como só acontece em falta de
+      // cache, isso não custa nada nas aberturas normais.
+      return fetch(req, { cache: 'no-cache' })
+        .then((r) => guardar(req, r))
+        .catch(async () =>
+          // Navegação offline de uma rota que não está no cache ainda abre o app.
+          (req.mode === 'navigate' ? await caches.match('./index.html') : undefined)
+        );
+    })
   );
 });
 

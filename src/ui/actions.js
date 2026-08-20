@@ -68,9 +68,15 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
     const valor = c.type === 'money' ? formatCents(Math.abs(c.value || 0)) : (c.value ?? '');
     const modo = c.type === 'money' ? 'decimal' : c.type === 'number' ? 'numeric' : 'text';
     const tipo = c.type === 'date' ? 'date' : 'text';
+    // Campo de confirmação: o teclado do iPhone não pode "ajudar". Autocapitular
+    // e autocorrigir uma palavra-senha é o caminho curto para a pessoa digitar
+    // certo e o app dizer que está errado.
+    const teclado = c.type === 'senha-confirma'
+      ? 'autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"'
+      : c.type === 'text' ? 'autocapitalize="sentences"' : '';
     return `<div class="field"><label for="${id}">${esc(c.label)}</label>
       <input type="${tipo}" inputmode="${modo}" id="${id}" name="${c.name}" value="${esc(valor)}"
-        placeholder="${esc(c.placeholder || '')}" ${c.type === 'text' ? 'autocapitalize="sentences"' : ''}>
+        placeholder="${esc(c.placeholder || '')}" ${teclado}>
       ${c.hint ? `<span style="font-size:11px;color:var(--muted)">${esc(c.hint)}</span>` : ''}</div>`;
   }).join('');
 
@@ -113,6 +119,11 @@ const opcoesOrigem = () => [
 ];
 
 const novoId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
+/** Compara duas palavras ignorando caixa, acento e espaço sobrando. */
+const igual = (a, b) =>
+  String(a ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  === String(b ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 /** Entrega um arquivo pelo melhor caminho do aparelho. */
 async function entregar(conteudo, nome, tipo = 'text/plain') {
@@ -486,8 +497,9 @@ const ACOES = {
   async atualizar() {
     const { instalarAtualizacao, forcarAtualizacao } = await import('./app.js');
     toast('Instalando a versão nova…');
-    if (await instalarAtualizacao()) return; // o recarregamento vem sozinho
-    await forcarAtualizacao();
+    // instalarAtualizacao já recarrega sozinha; o forçar é para o caso de não
+    // haver service worker nenhum (aba comum, primeira visita).
+    if (!(await instalarAtualizacao())) await forcarAtualizacao();
   },
 
   /**
@@ -588,12 +600,17 @@ const ACOES = {
     });
     if (!ok) return;
 
+    // Limpar os dados não destrói o cofre e um backup traz tudo de volta, então
+    // a folha de confirmação já basta. Pedir para digitar uma palavra aqui seria
+    // fricção teatral.
     if (!eraExemplo) {
-      const confirma = await form('Confirmar',
-        'Digite LIMPAR para confirmar. Se você quer guardar o que está aqui, cancele e faça um backup antes.',
-        [{ name: 'palavra', label: 'Confirmação', type: 'text', placeholder: 'LIMPAR' }],
-        { ok: 'Limpar agora' });
-      if (confirma?.palavra !== 'LIMPAR') { toast('Nada foi limpo.'); return; }
+      const mesmo = await confirmar({
+        titulo: 'Confirmando',
+        texto: 'Isto apaga os seus lançamentos, cartões, dívidas, cofrinhos e tetos. Se você quer guardar o que está aqui, cancele e faça um backup antes.',
+        ok: 'Sim, limpar agora',
+        perigo: true,
+      });
+      if (!mesmo) { toast('Nada foi limpo.'); return; }
     }
 
     const { documentoNovo } = await import('./app.js');
@@ -613,13 +630,21 @@ const ACOES = {
     if (!ok) return;
 
     const confirma = await form('Tem certeza mesmo?',
-      'Digite APAGAR em maiúsculas para confirmar.',
-      [{ name: 'palavra', label: 'Confirmação', type: 'text', placeholder: 'APAGAR' }],
+      'Escreva a palavra apagar para confirmar. Depois disso só o seu arquivo de backup traz os dados de volta.',
+      [{ name: 'palavra', label: 'Escreva: apagar', type: 'senha-confirma', placeholder: 'apagar' }],
       { ok: 'Apagar definitivamente' });
-    if (confirma?.palavra !== 'APAGAR') { toast('Nada foi apagado.'); return; }
+    if (!confirma) return;
 
-    await db.wipe();
-    location.reload();
+    // Comparação tolerante de propósito. A versão anterior exigia "APAGAR" em
+    // maiúsculas, e o teclado do iPhone entrega "Apagar" — a pessoa digitava
+    // certo, o app recusava e só dizia "Nada foi apagado". Confirmação tem de
+    // ser barreira contra o toque distraído, não contra o autocorretor.
+    if (igual(confirma.palavra, 'apagar')) {
+      await db.wipe();
+      location.reload();
+      return;
+    }
+    toast('A palavra não confere — nada foi apagado.');
   },
 };
 

@@ -347,6 +347,50 @@ const guia = async (page) => {
   await ctx.close();
 }
 
+// ------------------------------------------------------ confirmar por escrito
+//
+// Existe porque a confirmação exigia "APAGAR" em maiúsculas e o teclado do
+// iPhone entrega "Apagar": a pessoa digitava certo, o app recusava, e a única
+// resposta era "Nada foi apagado." — sem dizer o que estava errado.
+
+{
+  console.log('\nconfirmação por escrito');
+  for (const [digitado, deveApagar] of [['Apagar', true], ['APAGAR', true], ['  apagar ', true], ['errado', false]]) {
+    const { ctx, page } = await novoAparelho('exemplo');
+    await page.evaluate(() => { location.hash = '#tudo'; });
+    await page.waitForTimeout(350);
+    await page.click('[data-act="apagar"]');
+    await page.waitForSelector('.sheet [data-a="ok"]');
+    await page.click('.sheet [data-a="ok"]');
+    await page.waitForSelector('.sheet [name="palavra"]', { timeout: 8000 });
+
+    if (digitado === 'Apagar') {
+      const teclado = await page.evaluate(() => {
+        const i = document.querySelector('.sheet [name="palavra"]');
+        return { cap: i.getAttribute('autocapitalize'), corr: i.getAttribute('autocorrect') };
+      });
+      ok('o campo não deixa o teclado autocapitalizar nem autocorrigir',
+        teclado.cap === 'off' && teclado.corr === 'off');
+    }
+
+    await page.fill('.sheet [name="palavra"]', digitado);
+    await page.click('.sheet button[type="submit"]');
+
+    if (!deveApagar) {
+      // o aviso some sozinho em poucos segundos: conferir agora, não depois
+      const aviso = await page.waitForSelector('.toast', { timeout: 5000 }).catch(() => null);
+      ok('o aviso diz por que não apagou',
+        !!aviso && (await aviso.textContent()).includes('não confere'));
+    }
+
+    const apagou = await page.waitForSelector('#anotei', { timeout: 20000 }).then(() => true).catch(() => false);
+    ok(`"${digitado}" ${deveApagar ? 'apaga' : 'é recusado'}`, apagou === deveApagar);
+
+    await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); }).catch(() => {});
+    await ctx.close();
+  }
+}
+
 // -------------------------------------------------- atualização chega sozinha
 //
 // A pergunta que este bloco responde: publicando uma versão nova, o app
@@ -391,19 +435,58 @@ const guia = async (page) => {
 
     const antes = await page.evaluate(async () => (await import('./src/ui/app.js')).app.doc.transactions.length);
 
-    // "publica" uma versão nova mudando um texto visível
+    // "publica" uma versão nova: muda um texto visível e carimba a versão,
+    // que é exatamente o que `npm run versionar` faz antes de cada publicação
     writeFileSync(alvo, original.replace('Últimos lançamentos', 'MARCADOR-DE-VERSAO-NOVA'));
+    const { gravar, versaoGravada } = await import('../scripts/versionar.mjs');
+    const versaoAntiga = versaoGravada(raiz);
+    const versaoNova = gravar(raiz);
+    ok('publicar muda a versão carimbada no service worker', versaoAntiga !== versaoNova,
+      `${versaoAntiga} → ${versaoNova}`);
 
     // a pessoa fecha e abre o app
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#pw', { timeout: 20000 });
     await page.fill('#pw', SENHA);
     await page.click('#ok');
-    await page.waitForSelector('.tabbar', { timeout: 20000 });
-    await page.waitForTimeout(1500);
+    await page.waitForSelector('.tabbar', { timeout: 25000 });
 
-    ok('a versão nova chega só de abrir o app',
-      await page.evaluate(() => document.body.innerText.includes('MARCADOR-DE-VERSAO-NOVA')));
+    // O app NÃO se reinicia no meio do uso: a versão nova espera na faixa até
+    // a pessoa aceitar. Aparecer a faixa já é a atualização ter chegado.
+    const faixa = await page.waitForSelector('.atz', { timeout: 25000 }).catch(() => null);
+    const jaTrocou = await page.evaluate(() => document.body.innerText.includes('MARCADOR-DE-VERSAO-NOVA'));
+    ok('a versão nova chega só de abrir o app', !!faixa || jaTrocou,
+      jaTrocou ? 'trocou direto' : 'faixa oferecendo instalar');
+
+    if (faixa && !jaTrocou) {
+      // Aceitar recarrega a página, que volta para o desbloqueio.
+      // O clique re-consulta o seletor de propósito: `render()` troca o
+      // innerHTML inteiro, e uma referência guardada antes disso aponta para um
+      // nó que não está mais no documento — o clique iria para o vazio.
+      await page.click('.atz');
+      await page.waitForSelector('#pw', { timeout: 25000 });
+      await page.fill('#pw', SENHA);
+      await page.click('#ok');
+      await page.waitForSelector('.tabbar', { timeout: 25000 });
+
+      ok('aceitar deixa o service worker servindo a versão nova',
+        await page.evaluate(async () =>
+          (await fetch('./src/ui/screens.js').then((r) => r.text())).includes('MARCADOR-DE-VERSAO-NOVA')));
+
+      const guardados = await page.evaluate(() => caches.keys());
+      ok('e sobra um cache só', guardados.length === 1, guardados.join(', '));
+
+      // A tela em si pode levar mais um carregamento: os módulos velhos já
+      // estavam na memória quando a página recarregou. A próxima abertura —
+      // que é o que a pessoa faz — mostra a versão nova.
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('#pw', { timeout: 25000 });
+      await page.fill('#pw', SENHA);
+      await page.click('#ok');
+      await page.waitForSelector('.tabbar', { timeout: 25000 });
+      ok('e na abertura seguinte a tela é a nova',
+        await page.evaluate(() => document.body.innerText.includes('MARCADOR-DE-VERSAO-NOVA')));
+    }
 
     const depois = await page.evaluate(async () => (await import('./src/ui/app.js')).app.doc.transactions.length);
     ok('e os dados atravessam a atualização intactos', depois === antes && depois > 0,
@@ -414,7 +497,40 @@ const guia = async (page) => {
   } finally {
     // nunca deixar o repositório sujo, mesmo se algo acima falhar
     writeFileSync(alvo, original);
+    const { gravar } = await import('../scripts/versionar.mjs');
+    gravar(raiz);
   }
+}
+
+// ------------------------------------------------------- velocidade de abertura
+//
+// Existe porque a folha de estilo do Google Fonts, sendo bloqueante, custava
+// 14 SEGUNDOS de tela branca numa rede ruim — num app cujos arquivos próprios
+// somam 25 ms. Um app que roda no seu aparelho não pode depender do Google
+// para abrir.
+
+{
+  console.log('\nvelocidade de abertura');
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+
+  // simula o Google inalcançável — rede corporativa, DNS envenenado, 4G ruim
+  await page.route('**://fonts.googleapis.com/**', (r) => r.abort());
+  await page.route('**://fonts.gstatic.com/**', (r) => r.abort());
+
+  const t = Date.now();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#anotei', { timeout: 30000 });
+  const ms = Date.now() - t;
+  ok('abre em menos de 3 s mesmo sem alcançar o Google Fonts', ms < 3000, `${ms} ms`);
+
+  ok('e o texto continua legível com as fontes do sistema',
+    await page.evaluate(() => {
+      const f = getComputedStyle(document.querySelector('.ser') || document.body).fontFamily;
+      return f.length > 0;
+    }));
+
+  await ctx.close();
 }
 
 await browser.close();

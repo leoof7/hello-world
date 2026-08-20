@@ -93,13 +93,21 @@ nova.** São duas coisas separadas e nunca se encostam:
 | **Os seus dados** (cofre cifrado) | IndexedDB | não é tocado |
 
 Como funciona na prática: abrindo o app com internet, ele checa se existe versão
-nova e a busca. Na maioria das vezes você nem percebe — abre e já está atualizado.
-Se a nova versão só ficar pronta depois que o app carregou, aparece uma faixa
-verde no topo: *"Versão nova pronta · toque para instalar"*.
+nova e a baixa em segundo plano. Quando ela fica pronta, uma faixa verde aparece
+no topo — *"Versão nova pronta · toque para instalar"* — e espera você.
 
-Se quiser forçar: *Tudo → Segurança e espaço → Buscar atualização*. Se ele disser
-que você já está na mais nova mas o app parecer velho, ali mesmo dá para jogar
-fora a cópia guardada e baixar tudo de novo — e isso também **não** apaga dados.
+O app **não** se reinicia sozinho no meio do uso. Seria grosseiro: você está
+lançando um gasto e ele se reinicia pedindo Face ID de novo. Só troca sozinho
+quando não custa nada — se você ainda não destravou o cofre.
+
+Se quiser forçar: *Tudo → Segurança e espaço → Buscar atualização*. Ali também
+dá para jogar fora a cópia guardada e baixar tudo de novo, o que **não** apaga
+dados.
+
+**Publicando uma versão nova** (para quem mexe no código): rode
+`npm run versionar` antes de commitar. Ele carimba no service worker um hash do
+conteúdo, que é como o navegador percebe que há novidade. Esquecer não é uma
+opção — `npm test` falha se o carimbo estiver velho.
 
 ## Backup
 
@@ -171,6 +179,7 @@ src/core/                     cálculo puro e testado, sem DOM
   debts budget categorize leaks health parse
 src/data/                     db crypto recovery migrations backup
 src/io/                       csv ofx ics
+scripts/versionar.mjs         carimba o hash da versão no service worker
 src/seed/                     categorias, comércios BR e cenário de exemplo
 src/ui/                       app state screens actions dom
 test/                         *.test.js

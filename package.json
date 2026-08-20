@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Gestor financeiro pessoal que roda inteiro no aparelho. Sem servidor, sem conta, sem mensalidade.",
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node scripts/versionar.mjs --conferir && node --test test/*.test.js",
     "serve": "python3 -m http.server 8000",
-    "test:browser": "node test/browser.mjs"
+    "test:browser": "node test/browser.mjs",
+    "versionar": "node scripts/versionar.mjs"
   }
 }

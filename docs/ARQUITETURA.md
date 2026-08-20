@@ -113,36 +113,64 @@ perde os dados dos usuários na terceira atualização.
 
 ---
 
-## 7. Service worker: rede primeiro, não cache primeiro
+## 7. Atualizar sem congelar e sem engasgar
 
-Um PWA instalado que serve o cache antes da rede vira um app **congelado**: a
-pessoa nunca mais recebe correção nenhuma, e a única saída é apagar o site.
-Foi exatamente o que aconteceu na primeira versão daqui.
+Três tentativas, cada uma ensinando uma coisa:
 
-A receita comum é bater o nome do cache a cada publicação. É frágil pelo motivo
-óbvio: basta esquecer uma vez. Então a estratégia é a outra:
+**1. Cache primeiro com versão fixa.** O app instalado nunca mais via
+atualização — servia o mesmo cache para sempre, e a única saída seria apagar o
+site. Congelado.
 
-- **arquivos do app** → rede primeiro, cache como rede de segurança. Online, você
-  roda o que está publicado. Offline, o cache abre o app.
-- **fontes** → cache primeiro. Não mudam.
+**2. Rede primeiro.** Atualizava, mas custava uma revalidação por módulo. Com
+~30 arquivos a abertura foi de instantânea para **13 segundos**. Um app de
+finanças que demora 13 s para abrir não é usado.
 
-Duas armadilhas que o "rede primeiro" ingênuo não cobre, e que só apareceram
-testando uma publicação de verdade no navegador:
+**3. Cache primeiro com troca atômica de versão** — o que está aqui. Serve do
+cache (rápido, e offline funciona) e troca o cache **inteiro** quando o hash do
+conteúdo muda. Ou você está inteiramente na versão velha, ou inteiramente na
+nova: meia versão de um app que calcula dinheiro seria pior que versão velha.
 
-1. `fetch(req)` sozinho **não** vai à rede: o cache HTTP do navegador responde
-   no lugar do servidor e devolve a versão velha. Precisa de
-   `fetch(req, { cache: 'no-cache' })`, que revalida — 304 quando nada mudou.
+A receita comum para a versão é "lembre de trocar a constante a cada
+publicação". É frágil pelo motivo óbvio. Aqui `scripts/versionar.mjs` calcula o
+hash do conteúdo e carimba no `sw.js`, e `npm test` falha se o carimbo estiver
+velho — dá para esquecer, não dá para publicar esquecido.
+
+Armadilhas que só apareceram simulando publicações de verdade no navegador:
+
+1. `fetch(req)` **não** vai à rede: o cache HTTP do navegador responde no lugar
+   do servidor e devolve a versão velha. O `install` e o fallback de falta de
+   cache usam `{ cache: 'no-cache' }`. Nas aberturas normais nada disso roda —
+   tudo vem do cache do service worker.
 2. O próprio `sw.js` pode ficar até 24 h parado no cache HTTP. O registro usa
-   `updateViaCache: 'none'` para que a correção não chegue só no dia seguinte.
+   `updateViaCache: 'none'`.
+3. `clients.claim()` dispara `controllerchange` também na **primeira**
+   instalação. Recarregar ali jogava a pessoa para fora do cadastro das doze
+   palavras, no meio.
+4. O service worker era registrado no fim de `main()`, que fica bloqueado
+   esperando o desbloqueio do cofre. Quem parasse no cadastro nunca teria app
+   offline.
 
-E uma armadilha do lado do app: `clients.claim()` dispara `controllerchange`
-também na **primeira** instalação. Recarregar ali jogava a pessoa para fora do
-cadastro das doze palavras, no meio. Só recarrega quando já havia um
-controlador antes — quando é troca de versão de verdade.
+E uma decisão de educação, não de técnica: quando a versão nova fica pronta com
+o app **em uso**, ele não se reinicia. Mostra a faixa e espera. Trocar sozinho
+no meio de um lançamento, obrigando a passar o Face ID de novo, é o tipo de
+coisa que faz a pessoa desconfiar do app.
+
+## 8. As fontes não podem bloquear a abertura
+
+Um `<link rel="stylesheet">` para o Google Fonts trava a pintura da página até
+responder. Medido aqui: **14.155 ms** de tela branca quando o Google está
+inalcançável — num app cujos arquivos próprios somam 25 ms.
+
+Um app que roda inteiro no seu aparelho não pode depender do Google para abrir.
+A folha entra com `media="print"` e é promovida a `all` no `onload`: baixa sem
+bloquear, e até chegar vale a pilha de fallback do CSS — que por isso não é
+decoração, é o que o app usa se a webfont nunca chegar.
+
+Abertura depois da correção: **~180 ms**, com ou sem Google.
 
 ---
 
-## 8. Sem framework, sem build
+## 9. Sem framework, sem build
 
 Sem React, sem bundler, sem `node_modules`. Cada tela devolve HTML como string
 e o render troca o conteúdo de uma vez.
@@ -160,7 +188,7 @@ próprio e animação entre elas, o custo se inverte. Não é o caso hoje.
 
 ---
 
-## 9. Camadas
+## 10. Camadas
 
 ```
 src/core/    cálculo puro — sem DOM, sem IndexedDB, 100% testável
@@ -175,7 +203,7 @@ isso os testes cobrem o que aparece na tela sem precisar abrir navegador.
 
 ---
 
-## 10. `MODO = 'pessoal' | 'produto'`
+## 11. `MODO = 'pessoal' | 'produto'`
 
 `src/config.js` tem a chave que decide o que fica ligado:
 
@@ -208,7 +236,7 @@ só vale quando houver receita para justificar.
 
 ---
 
-## 11. O que ficou de fora, e por quê
+## 12. O que ficou de fora, e por quê
 
 | Do PDF original | Decisão |
 |---|---|
