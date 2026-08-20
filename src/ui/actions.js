@@ -1139,6 +1139,12 @@ async function editarDivida(id) {
     taxa: d0 ? String((d0.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
     minimoPct: d0?.minPaymentRate ? String((d0.minPaymentRate * 100).toFixed(0)) : '',
     minimoFixo: d0?.minPaymentCents || 0,
+    cardId: d0?.cardId || '',
+    bloqueado: !!d0?.cardBlocked,
+    acordo: !!d0?.agreement,
+    acordoForma: d0?.agreement?.form || 'parcelado',
+    acordoValor: d0?.agreement ? Math.abs(d0.balanceCents) : 0,
+    acordoParcelas: d0?.agreement?.installments || 1,
   };
   let erro = null;
 
@@ -1154,19 +1160,60 @@ async function editarDivida(id) {
             { value: KIND.LOAN, label: 'Empréstimo' },
             { value: KIND.INSTALLMENT, label: 'Parcelamento já contratado' },
           ] },
+        { name: 'cardId', label: 'Cartão vinculado (se for fatura atrasada)', type: 'select', value: atual.cardId,
+          options: [{ value: '', label: 'Nenhum' }, ...app.doc.cards.map((c) => ({ value: c.id, label: c.name }))] },
+        { name: 'bloqueado', label: 'Cartão bloqueado', type: 'checkbox', value: atual.bloqueado },
         { name: 'saldo', label: 'Quanto deve hoje', type: 'money', value: atual.saldo },
         { name: 'taxa', label: 'Juros ao mês (%)', type: 'percent', value: atual.taxa,
           hint: 'só o número. Rotativo costuma ficar entre 12 e 16; cheque especial no teto de 8' },
         { name: 'minimoPct', label: 'Mínimo: quantos POR CENTO do saldo', type: 'percent', value: atual.minimoPct,
           hint: 'só o número, sem R$. Cartão costuma exigir 15. Se o seu mínimo é um valor fixo em reais, deixe vazio e use o campo abaixo' },
         { name: 'minimoFixo', label: 'Ou mínimo fixo por mês, em reais', type: 'money', value: atual.minimoFixo },
-      ], { ok: 'Salvar', apagar: d0 ? 'Quitei esta dívida' : null });
+        { name: 'acordo', label: 'Já negociei um acordo pra essa dívida', type: 'checkbox', value: atual.acordo },
+        { name: 'acordoForma', label: 'Forma de pagamento do acordo', type: 'segmento', value: atual.acordoForma,
+          options: [{ value: 'avista', label: 'À vista' }, { value: 'parcelado', label: 'Parcelado' }] },
+        { name: 'acordoValor', label: 'Valor total do acordo', type: 'money', value: atual.acordoValor },
+        { name: 'acordoParcelas', label: 'Em quantas parcelas', type: 'number', value: atual.acordoParcelas, min: 1, max: 60 },
+      ], {
+        ok: 'Salvar',
+        apagar: d0 ? 'Quitei esta dívida' : null,
+        aoMontar: (card) => {
+          const cardIdSel = card.querySelector('[name="cardId"]');
+          const linhaBloqueado = card.querySelector('[name="bloqueado"]').closest('.field');
+          const acordoChk = card.querySelector('[name="acordo"]');
+          const linhaSaldo = card.querySelector('[name="saldo"]').closest('.field');
+          const linhaTaxa = card.querySelector('[name="taxa"]').closest('.field');
+          const linhaMinPct = card.querySelector('[name="minimoPct"]').closest('.field');
+          const linhaMinFixo = card.querySelector('[name="minimoFixo"]').closest('.field');
+          const linhaForma = card.querySelector('[name="acordoForma"]').closest('.field');
+          const linhaValor = card.querySelector('[name="acordoValor"]').closest('.field');
+          const linhaParcelas = card.querySelector('[name="acordoParcelas"]').closest('.field');
+
+          const atualizar = () => {
+            linhaBloqueado.style.display = cardIdSel.value ? '' : 'none';
+            const fezAcordo = acordoChk.checked;
+            linhaSaldo.style.display = fezAcordo ? 'none' : '';
+            linhaTaxa.style.display = fezAcordo ? 'none' : '';
+            linhaMinPct.style.display = fezAcordo ? 'none' : '';
+            linhaMinFixo.style.display = fezAcordo ? 'none' : '';
+            linhaForma.style.display = fezAcordo ? '' : 'none';
+            linhaValor.style.display = fezAcordo ? '' : 'none';
+            const formaSel = card.querySelector('[name="acordoForma"]')?.value;
+            linhaParcelas.style.display = fezAcordo && formaSel === 'parcelado' ? '' : 'none';
+          };
+
+          cardIdSel.addEventListener('change', atualizar);
+          acordoChk.addEventListener('change', atualizar);
+          card.querySelector('[name="acordoForma"]').addEventListener('change', atualizar);
+          atualizar();
+        },
+      });
 
     if (!r) return;
 
     if (r.__apagar) {
       await commit((d) => { d.debts = d.debts.filter((x) => x.id !== id); });
-      toast('Uma a menos. É assim que acaba.');
+      await celebrarQuitacao(d0);
       return;
     }
 
@@ -1174,14 +1221,19 @@ async function editarDivida(id) {
     erro = conferirDivida(r);
     if (erro) { toast(erro); continue; }
 
+    const fezAcordo = r.acordo;
+    const parcelasAcordo = r.acordoForma === 'avista' ? 1 : Math.max(1, r.acordoParcelas);
     const registro = {
       id: id || novoId('dv'),
       name: r.name || 'Dívida',
-      kind: r.kind,
-      balanceCents: Math.abs(r.saldo),
-      monthlyRate: r.kind === KIND.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
-      minPaymentRate: pctParaFracao(r.minimoPct),
-      minPaymentCents: r.minimoFixo,
+      kind: fezAcordo ? KIND.INSTALLMENT : r.kind,
+      balanceCents: fezAcordo ? Math.abs(r.acordoValor) : Math.abs(r.saldo),
+      monthlyRate: fezAcordo || r.kind === KIND.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
+      minPaymentRate: fezAcordo ? 0 : pctParaFracao(r.minimoPct),
+      minPaymentCents: fezAcordo ? Math.round(Math.abs(r.acordoValor) / parcelasAcordo) : r.minimoFixo,
+      cardId: r.cardId || null,
+      cardBlocked: r.cardId ? !!r.bloqueado : false,
+      agreement: fezAcordo ? { madeOn: d0?.agreement?.madeOn || app.todayISO, installments: parcelasAcordo, form: r.acordoForma } : null,
       since: d0?.since || app.todayISO,
     };
 
@@ -1193,6 +1245,28 @@ async function editarDivida(id) {
     toast('Salvo.');
     return;
   }
+}
+
+/** A saída de uma dívida merece mais que um toast — principalmente a última. */
+async function celebrarQuitacao(dividaQuitada) {
+  const v = app.view;
+  const nome = dividaQuitada?.name || 'Essa dívida';
+  const livre = v.dividaTotalCents === 0;
+
+  return sheet(
+    `${livre
+      ? `<h4>Livre de dívidas</h4>
+         <p class="sub">${esc(nome)} era a última. Zero é zero de verdade agora — nenhuma dívida cadastrada.</p>`
+      : `<h4>Uma a menos</h4>
+         <p class="sub">${esc(nome)} quitada. Faltam ${v.dividas.length} ${v.dividas.length === 1 ? 'dívida' : 'dívidas'}
+           · ${esc(brl(v.dividaTotalCents))} para ficar livre.</p>`}
+     <div class="btns"><button class="btn primary" data-ok="1">${livre ? 'Fechar' : 'Continuar'}</button></div>`,
+    {
+      onMount: (card, fechar) => {
+        card.querySelector('[data-ok]').onclick = () => fechar(null);
+      },
+    }
+  );
 }
 
 async function editarCofrinho(id) {

@@ -526,8 +526,10 @@ function faturaCartao(c, v) {
     </div>` : ''}
     ${c.overdue ? `<div class="nudge crit" style="margin:10px 0 0">
       <span class="ic">${icon('alerta')}</span>
-      <div><b>Fatura em atraso · ${m(Math.abs(c.overdue.balanceCents))}</b>
-      <i>rotativo a ${percent(c.overdue.monthlyRate, 1)} ao mês — ${percent(Math.pow(1 + c.overdue.monthlyRate, 12) - 1, 0)} ao ano</i></div>
+      <div><b>Fatura em atraso · ${m(Math.abs(c.overdue.balanceCents))}${c.overdue.cardBlocked ? ' · bloqueado' : ''}</b>
+      <i>${c.overdue.agreement
+        ? `acordo ${c.overdue.agreement.form === 'avista' ? 'à vista' : `em ${c.overdue.agreement.installments}x`} · sem juro novo`
+        : `rotativo a ${percent(c.overdue.monthlyRate, 1)} ao mês — ${percent(Math.pow(1 + c.overdue.monthlyRate, 12) - 1, 0)} ao ano`}</i></div>
     </div>` : ''}
     ${c.limitCents ? `
     <div class="bar" style="margin-top:12px"><i style="width:${(c.usedRatio * 100).toFixed(0)}%;background:${usoCor}"></i></div>
@@ -761,6 +763,10 @@ function dividaCard(d, i, plano, v) {
       <span class="num" style="font-size:12px;color:var(--red)">${m(Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
     ${quitacao ? `<div class="ft"><span style="font-size:11px;color:var(--muted)">Quita em</span>
       <span class="num" style="font-size:12px;color:var(--jade)">${formatMonthKey(quitacao)}</span></div>` : ''}
+    ${d.agreement || d.cardBlocked ? `<div class="legend" style="margin-top:8px">
+      ${d.agreement ? `<span><i style="background:var(--jade)"></i>acordo ${d.agreement.form === 'avista' ? 'à vista' : `em ${d.agreement.installments}x`}</span>` : ''}
+      ${d.cardBlocked ? `<span><i style="background:var(--red)"></i>cartão bloqueado</span>` : ''}
+    </div>` : ''}
     ${implausivel ? `<button class="nudge crit" data-act="editar-divida" data-id="${esc(d.id)}" style="margin:10px 0 0;width:100%">
       <span class="ic">${icon('alerta')}</span>
       <div><b>Confira esta dívida</b><i>está cadastrada com ${esc(implausivel)}, o que não existe.
