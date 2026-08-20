@@ -110,10 +110,19 @@ export function allocation(transactions, categories, monthKeyStr, savedCents = 0
   };
 }
 
-/** Patrimônio líquido: o que é seu menos o que você deve. */
+/**
+ * Patrimônio líquido: o que é seu menos o que você deve.
+ *
+ * Conta negativa com cheque especial cadastrado como dívida (accountId) já
+ * conta o saldo negativo por lá, com juro e tudo — somar de novo aqui contaria
+ * a mesma dívida duas vezes.
+ */
 export function netWorth(accounts, debts) {
+  const contasComDivida = new Set(debts.filter((d) => d.accountId).map((d) => d.accountId));
   const ativos = sum(accounts.filter((a) => a.balanceCents > 0).map((a) => a.balanceCents));
-  const passivos = totalBalance(debts) + sum(accounts.filter((a) => a.balanceCents < 0).map((a) => Math.abs(a.balanceCents)));
+  const passivos = totalBalance(debts) + sum(
+    accounts.filter((a) => a.balanceCents < 0 && !contasComDivida.has(a.id)).map((a) => Math.abs(a.balanceCents))
+  );
   return { assetsCents: ativos, liabilitiesCents: passivos, netCents: ativos - passivos };
 }
 

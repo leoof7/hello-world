@@ -260,6 +260,12 @@ async function completarOnboardingObrigatorio(page) {
   await page.click('.sheet button[type="submit"]');
   await page.waitForTimeout(300);
 
+  // Termina os 3 passos e cai na oferta do tour guiado — dispensa pra
+  // continuar testando o app normal.
+  await page.waitForSelector('[data-act="pular-tour"]', { timeout: 20000 });
+  await page.click('[data-act="pular-tour"]');
+  await page.waitForTimeout(300);
+
   await page.waitForSelector('.tabbar', { timeout: 20000 });
 }
 

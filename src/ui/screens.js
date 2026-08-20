@@ -80,6 +80,28 @@ function onboarding(app) {
   `;
 }
 
+/** Assim que os 3 passos terminam, oferece o tour guiado uma vez só. */
+function ofertaTourPendente(doc) {
+  const o = doc?.profile?.onboarding;
+  return !!o && !o.tourOferecido && !o.tourFeito;
+}
+
+function ofertaTour() {
+  return `
+  <div class="hd"><div class="greet"><span class="s">Pronto</span><span class="n">Tudo cadastrado</span></div></div>
+
+  <div class="sec" style="margin-top:0"><div class="say">
+    <div class="q ser">Quer um tour rápido pelas abas?</div>
+    <p class="p">Uns dois minutos passando pelas telas principais — o que cada uma mostra e pra que serve. Dá pra fazer depois também, em Tudo → Como usar.</p>
+  </div></div>
+
+  <div class="btns" style="flex-direction:column;margin-top:20px">
+    <button class="btn primary" data-act="tour" style="width:100%">Fazer o tour</button>
+    <button class="btn ghost" data-act="pular-tour" style="width:100%">Ir direto pro app</button>
+  </div>
+  `;
+}
+
 export function render(app) {
   esconder = app.privacy;
 
@@ -87,6 +109,15 @@ export function render(app) {
     document.getElementById('app').innerHTML = `
       ${faixaExemplo(app)}
       <div class="screens"><section class="screen active">${onboarding(app)}</section></div>
+    `;
+    wire(app);
+    return;
+  }
+
+  if (ofertaTourPendente(app.doc)) {
+    document.getElementById('app').innerHTML = `
+      ${faixaExemplo(app)}
+      <div class="screens"><section class="screen active">${ofertaTour()}</section></div>
     `;
     wire(app);
     return;
@@ -373,7 +404,7 @@ const serieSaldo = (v) =>
   v.projecao.days.filter((_, i) => i % 6 === 0).map((d) => d.balanceCents / 100);
 
 function cartaoMini(c) {
-  const cor = { red: 'c-red', blue: 'c-blue', jade: 'c-jade', steel: 'c-steel' }[c.color] || 'c-blue';
+  const cor = { red: 'c-red', blue: 'c-blue', jade: 'c-jade', steel: 'c-steel', amber: 'c-amber', violet: 'c-violet', graphite: 'c-graphite' }[c.color] || 'c-blue';
   const valor = c.overdue ? Math.abs(c.overdue.balanceCents) : (c.nextStatement?.totalCents || 0);
   return `<button class="cmini ${cor}" data-go="cartoes">
     ${c.overdue ? '<span class="flag">EM ATRASO</span>' : ''}
@@ -1138,6 +1169,10 @@ function guia(app) {
     <div class="big ser">${g.feitos} <span style="font-size:22px;color:rgba(255,255,255,.55)">de ${g.total} feitas</span></div>
     <div class="prog"><i style="width:${pct}%"></i></div>
     <div class="foot"><span class="acc">${g.pendentes.length ? `faltam ${g.pendentes.length} · uns 10 minutos no total` : 'tudo configurado'}</span></div>
+  </div>
+
+  <div class="btns" style="margin-top:14px">
+    <button class="btn ghost" data-act="tour" style="width:100%">${icon('seta')} Fazer o tour guiado pelas abas</button>
   </div>
 
   ${bloco('Uma vez só', g.pendentes.length ? `${g.pendentes.length} pendentes` : 'completo',

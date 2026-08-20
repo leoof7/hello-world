@@ -15,7 +15,7 @@
   --jade: #0a7b5a; --jade-2: #0e9a70; --jade-soft: #e6f4ee; --on-jade: #fff;
   --amber: #b7791f; --amber-soft: #fdf3e2;
   --red: #c0392f; --red-soft: #fdeceb;
-  --violet: #6d55d8; --blue: #2f74c8; --steel: #7b8794;
+  --violet: #6d55d8; --blue: #2f74c8; --steel: #7b8794; --graphite: #3a4049;
   --hero: linear-gradient(160deg, #0d1116 0%, #181d24 55%, #212832 100%);
   --hero-glow: rgba(14,154,112,.34);
   --shadow-card: rgba(60,64,72,.18);
@@ -29,7 +29,7 @@
     --jade: #3ddc9a; --jade-2: #2ec288; --jade-soft: #153029; --on-jade: #08251b;
     --amber: #f0b34a; --amber-soft: #33270f;
     --red: #f2716a; --red-soft: #361c1c;
-    --violet: #9d8cf5; --blue: #5fa8f5; --steel: #99a3b0;
+    --violet: #9d8cf5; --blue: #5fa8f5; --steel: #99a3b0; --graphite: #565c66;
     --hero: linear-gradient(160deg, #0f1216 0%, #171b21 55%, #1d222a 100%);
     --hero-glow: rgba(61,220,154,.22);
     --shadow-card: rgba(0,0,0,.5);
@@ -43,7 +43,7 @@
   --jade: #3ddc9a; --jade-2: #2ec288; --jade-soft: #153029; --on-jade: #08251b;
   --amber: #f0b34a; --amber-soft: #33270f;
   --red: #f2716a; --red-soft: #361c1c;
-  --violet: #9d8cf5; --blue: #5fa8f5; --steel: #99a3b0;
+  --violet: #9d8cf5; --blue: #5fa8f5; --steel: #99a3b0; --graphite: #565c66;
   --hero: linear-gradient(160deg, #0f1216 0%, #171b21 55%, #1d222a 100%);
   --hero-glow: rgba(61,220,154,.22);
   --shadow-card: rgba(0,0,0,.5);
@@ -275,6 +275,9 @@ body {
 .c-steel .brand, .c-steel .n2, .c-steel .hold b { color: #16191d; }
 .c-steel .type, .c-steel .hold { color: rgba(22,25,29,.6); }
 .c-steel .chip3 { background: linear-gradient(135deg,#d4d8de,#b0b4ba 50%,#d4d8de); }
+.c-amber { background: linear-gradient(135deg,#5a3c0d,#a3711f 45%,#c98f2e); }
+.c-violet { background: linear-gradient(135deg,#2c2158,#5844a6 45%,#6d55d8); }
+.c-graphite { background: linear-gradient(135deg,#15181c,#2b3038 45%,#3a4049); }
 
 /* ---------- dívidas e metas ---------- */
 .debt, .goal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; margin-bottom: 8px; }
@@ -378,6 +381,15 @@ body {
   color: var(--ink); font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
 }
 .seg-opt.on { border-color: var(--jade); background: var(--jade); color: var(--on-jade); }
+.swatches { display: flex; flex-wrap: wrap; gap: 12px; padding: 2px 0; }
+.swatch {
+  width: 38px; height: 38px; border-radius: 50%; border: 2px solid transparent; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+}
+.swatch.on { border-color: var(--ink); }
+.swatch svg { width: 16px; height: 16px; stroke: #fff; opacity: 0; }
+.swatch.on svg { opacity: 1; }
+.swatch[data-swatch-value="steel"] svg { stroke: #16191d; }
 .words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0; }
 .word { background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 10px 8px; text-align: center; }
 .word .i { font-size: 9px; color: var(--faint); font-family: 'IBM Plex Mono', monospace; }

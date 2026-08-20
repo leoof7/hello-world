@@ -97,6 +97,15 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
         <input type="hidden" name="${c.name}" value="${esc(c.value ?? '')}">
       </div>`;
     }
+    if (c.type === 'cores') {
+      return `<div class="field"><label>${esc(c.label)}</label>
+        <div class="swatches" data-swatches="1">
+          ${c.options.map((o) => `<button type="button" class="swatch ${String(o.value) === String(c.value) ? 'on' : ''}"
+            data-swatch-value="${esc(o.value)}" style="background:var(--${esc(o.value)})" aria-label="${esc(o.label)}" title="${esc(o.label)}">${icon('check')}</button>`).join('')}
+        </div>
+        <input type="hidden" name="${c.name}" value="${esc(c.value ?? '')}">
+      </div>`;
+    }
     if (c.type === 'checkbox') {
       return `<div class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="${id}" name="${c.name}" ${c.value ? 'checked' : ''} style="width:22px;height:22px">
@@ -157,6 +166,17 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
             if (!botao) return;
             grupo.querySelectorAll('.seg-opt').forEach((b) => b.classList.toggle('on', b === botao));
             escondido.value = botao.dataset.segValue;
+            escondido.dispatchEvent(new Event('change'));
+          });
+        }
+
+        for (const grupo of card.querySelectorAll('.swatches')) {
+          const escondido = grupo.parentElement.querySelector('input[type="hidden"]');
+          grupo.addEventListener('click', (ev) => {
+            const botao = ev.target.closest('.swatch');
+            if (!botao) return;
+            grupo.querySelectorAll('.swatch').forEach((b) => b.classList.toggle('on', b === botao));
+            escondido.value = botao.dataset.swatchValue;
             escondido.dispatchEvent(new Event('change'));
           });
         }
@@ -303,6 +323,20 @@ const ACOES = {
     await commit((d) => {
       d.profile.onboarding = d.profile.onboarding || { done: false, steps: {} };
       d.profile.onboarding.steps[id] = 'pulado';
+    });
+  },
+
+  async tour() {
+    if (app.doc.profile.onboarding) {
+      await commit((d) => { d.profile.onboarding.tourOferecido = true; }, { redraw: false });
+    }
+    await tourGuiado(0);
+  },
+  async 'pular-tour'() {
+    await commit((d) => {
+      d.profile.onboarding = d.profile.onboarding || { done: false, steps: {} };
+      d.profile.onboarding.tourOferecido = true;
+      d.profile.onboarding.tourFeito = true;
     });
   },
 
@@ -897,6 +931,10 @@ async function editarLancamento(id, sugestao = {}) {
 
 async function editarConta(id) {
   const c = id ? app.doc.accounts.find((a) => a.id === id) : null;
+  // Conta negativa costuma SER uma dívida (cheque especial) — sem isso o app
+  // via um número negativo mudo e nunca contava o juro em lugar nenhum.
+  const dividaLigada = id ? app.doc.debts.find((x) => x.kind === KIND.OVERDRAFT && x.accountId === id) : null;
+
   const r = await form(c ? 'Editar conta' : 'Nova conta', null, [
     { name: 'name', label: 'Nome', type: 'text', value: c?.name || '', placeholder: 'Nubank' },
     { name: 'type', label: 'Tipo', type: 'select', value: c?.type || 'checking',
@@ -907,11 +945,34 @@ async function editarConta(id) {
       ] },
     { name: 'saldo', label: 'Saldo hoje', type: 'money', value: Math.abs(c?.balanceCents || 0) },
     { name: 'negativo', label: 'Está negativo', type: 'checkbox', value: (c?.balanceCents || 0) < 0 },
-  ], { ok: 'Salvar', apagar: c ? 'Apagar conta' : null });
+    { name: 'chequeEspecial', label: 'É cheque especial (cobra juro)', type: 'checkbox', value: !!dividaLigada },
+    { name: 'taxaChequeEspecial', label: 'Juros ao mês (%)', type: 'percent',
+      value: dividaLigada ? String((dividaLigada.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
+      hint: 'a taxa vem escrita no extrato. Cadastra (ou atualiza) a dívida em Dívidas sozinho, sem digitar de novo lá' },
+  ], {
+    ok: 'Salvar',
+    apagar: c ? 'Apagar conta' : null,
+    aoMontar: (card) => {
+      const negativo = card.querySelector('[name="negativo"]');
+      const cheque = card.querySelector('[name="chequeEspecial"]');
+      const linhaCheque = cheque.closest('.field');
+      const linhaTaxa = card.querySelector('[name="taxaChequeEspecial"]').closest('.field');
+      const atualizar = () => {
+        linhaCheque.style.display = negativo.checked ? '' : 'none';
+        linhaTaxa.style.display = negativo.checked && cheque.checked ? '' : 'none';
+      };
+      negativo.addEventListener('change', atualizar);
+      cheque.addEventListener('change', atualizar);
+      atualizar();
+    },
+  });
   if (!r) return;
 
   if (r.__apagar) {
-    await commit((d) => { d.accounts = d.accounts.filter((a) => a.id !== id); });
+    await commit((d) => {
+      d.accounts = d.accounts.filter((a) => a.id !== id);
+      d.debts = d.debts.filter((x) => !(x.kind === KIND.OVERDRAFT && x.accountId === id));
+    });
     toast('Conta apagada.');
     return;
   }
@@ -922,10 +983,27 @@ async function editarConta(id) {
     type: r.type,
     balanceCents: (r.negativo ? -1 : 1) * Math.abs(r.saldo),
   };
+  const ehChequeEspecial = r.negativo && r.chequeEspecial;
+
   await commit((d) => {
     d.accounts = id ? d.accounts.map((a) => (a.id === id ? { ...a, ...registro } : a)) : [...d.accounts, registro];
+
+    d.debts = d.debts.filter((x) => !(x.kind === KIND.OVERDRAFT && x.accountId === registro.id));
+    if (ehChequeEspecial) {
+      d.debts.push({
+        id: dividaLigada?.id || novoId('dv'),
+        name: `Cheque especial · ${registro.name}`,
+        kind: KIND.OVERDRAFT,
+        accountId: registro.id,
+        balanceCents: Math.abs(r.saldo),
+        monthlyRate: pctParaFracao(r.taxaChequeEspecial),
+        minPaymentRate: dividaLigada?.minPaymentRate || 0,
+        minPaymentCents: dividaLigada?.minPaymentCents || 0,
+        since: dividaLigada?.since || app.todayISO,
+      });
+    }
   });
-  toast('Salvo.');
+  toast(ehChequeEspecial ? 'Salvo — a dívida do cheque especial também foi atualizada.' : 'Salvo.');
 }
 
 async function editarCartao(id) {
@@ -937,10 +1015,12 @@ async function editarCartao(id) {
       { name: 'closingDay', label: 'Fecha dia', type: 'number', value: c?.closingDay || 20, min: 1, max: 31 },
       { name: 'dueDay', label: 'Vence dia', type: 'number', value: c?.dueDay || 27, min: 1, max: 31 },
       { name: 'limite', label: 'Limite', type: 'money', value: c?.limitCents || 0 },
-      { name: 'color', label: 'Cor', type: 'select', value: c?.color || 'blue',
+      { name: 'color', label: 'Cor', type: 'cores', value: c?.color || 'blue',
         options: [
           { value: 'red', label: 'Vermelho' }, { value: 'blue', label: 'Azul' },
           { value: 'jade', label: 'Verde' }, { value: 'steel', label: 'Prata' },
+          { value: 'amber', label: 'Âmbar' }, { value: 'violet', label: 'Roxo' },
+          { value: 'graphite', label: 'Grafite' },
         ] },
     ], { ok: 'Salvar', apagar: c ? 'Apagar cartão' : null });
   if (!r) return;
@@ -1168,7 +1248,7 @@ function pedirFrase() {
         : 'Para ditar no iPhone: toque no microfone do próprio teclado. Este navegador não dá ao app acesso ao reconhecimento de voz.'}</span>
      </div>
      ${Reconhecimento ? `<div class="btns"><button class="btn ghost" data-mic="1" style="width:100%">${icon('microfone')} Ditar</button></div>` : ''}
-     <div class="btns"><button class="btn primary" data-ok="1">Interpretar</button>
+     <div class="btns"><button class="btn primary" data-ok="1">Registrar</button>
        <button class="btn ghost" data-x="1">Cancelar</button></div>`,
     {
       onMount: (card, fechar) => {
@@ -1225,6 +1305,51 @@ function pedirFrase() {
       },
     }
   );
+}
+
+/**
+ * O tour guiado: passa pelas abas de verdade, uma de cada vez, com uma folha
+ * explicando o que aquela tela mostra. Não é texto imaginando a tela — a
+ * pessoa já está olhando pra ela enquanto lê.
+ */
+const TOUR_PASSOS = [
+  { screen: 'painel', titulo: 'Painel', texto: 'Sua tela de todo dia. Lança o gasto na hora, vê o resumo do momento e quanto falta para sair das dívidas.' },
+  { screen: 'cartoes', titulo: 'Cartões', texto: 'Suas contas e cartões, a fatura aberta de cada um, e o muro de parcelas — quanto já está comprometido nos próximos meses.' },
+  { screen: 'dividas', titulo: 'Dívidas', texto: 'Todas as suas dívidas, na ordem certa de atacar (o juro mais caro primeiro, não o maior saldo) — e a data em que você fica livre.' },
+  { screen: 'analise', titulo: 'Saúde', texto: 'Seu diagnóstico financeiro: custo de vida mínimo, reserva de emergência, patrimônio, e os tetos do mês por categoria.' },
+  { screen: 'tudo', titulo: 'Tudo', texto: 'Recebimentos, gastos fixos, cofrinhos, projetos, importar extrato do banco e fazer backup — o que não cabe nas outras abas.' },
+];
+
+async function tourGuiado(indice = 0) {
+  if (indice >= TOUR_PASSOS.length) {
+    if (app.doc.profile.onboarding) {
+      await commit((d) => { d.profile.onboarding.tourFeito = true; }, { redraw: false });
+    }
+    toast('Tour terminado — agora é usar.');
+    return;
+  }
+
+  const passo = TOUR_PASSOS[indice];
+  go(passo.screen);
+
+  const r = await sheet(
+    `<h4>${esc(passo.titulo)}</h4>
+     <p class="sub">${esc(passo.texto)}</p>
+     <div class="btns"><button class="btn primary" data-ok="1">${indice === TOUR_PASSOS.length - 1 ? 'Terminar' : 'Próximo'}</button>
+       <button class="btn ghost" data-x="1">Pular tour</button></div>`,
+    {
+      onMount: (card, fechar) => {
+        card.querySelector('[data-ok]').onclick = () => fechar('proximo');
+        card.querySelector('[data-x]').onclick = () => fechar(null);
+      },
+    }
+  );
+
+  if (r === 'proximo') return tourGuiado(indice + 1);
+
+  if (app.doc.profile.onboarding) {
+    await commit((d) => { d.profile.onboarding.tourFeito = true; }, { redraw: false });
+  }
 }
 
 /** Pede as doze palavras numa folha. Devolve o array ou null. */
