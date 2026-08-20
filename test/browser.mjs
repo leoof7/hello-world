@@ -347,6 +347,68 @@ const guia = async (page) => {
   await ctx.close();
 }
 
+// --------------------------------------------------- números que não existem
+//
+// Existe porque uma dívida de R$ 3.732 apareceu na tela pedindo R$ 136.232 de
+// mínimo: o valor em reais tinha sido digitado no campo de porcentagem, e nada
+// no caminho questionou 3650% do saldo.
+
+{
+  console.log('\nnúmeros impossíveis');
+  const { ctx, page } = await novoAparelho('vazio');
+  await page.evaluate(() => { location.hash = '#dividas'; });
+  await page.waitForTimeout(350);
+
+  await page.click('[data-act="nova-divida"]');
+  await page.waitForSelector('.sheet #frm');
+  await page.fill('.sheet [name="name"]', 'Cartão');
+  await page.fill('.sheet [name="saldo"]', '3.732,39');
+  await page.fill('.sheet [name="taxa"]', '16');
+  await page.fill('.sheet [name="minimoPct"]', '3650');   // reais no campo de %
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(700);
+
+  const barrado = await page.evaluate(() => ({
+    aviso: document.querySelector('.toast')?.textContent || '',
+    aberta: !!document.querySelector('.sheet'),
+    nome: document.querySelector('.sheet [name="name"]')?.value,
+    saldo: document.querySelector('.sheet [name="saldo"]')?.value,
+    taxa: document.querySelector('.sheet [name="taxa"]')?.value,
+  }));
+  ok('valor em reais no campo de porcentagem é recusado', barrado.aviso.includes('não existe'));
+  ok('e o formulário volta com tudo que foi digitado',
+    barrado.aberta && barrado.nome === 'Cartão' && barrado.saldo === '3.732,39' && barrado.taxa === '16');
+
+  await page.fill('.sheet [name="minimoPct"]', '15');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(800);
+
+  const certo = await page.evaluate(async () => {
+    const { app } = await import('./src/ui/app.js');
+    return {
+      taxa: app.doc.debts[0]?.minPaymentRate,
+      naTela: (document.body.innerText.match(/Mínimos obrigatórios\s*R\$\s*[\d.,]+/) || [''])[0],
+    };
+  });
+  ok('com 15% o mínimo fica plausível', certo.taxa === 0.15 && certo.naTela.includes('559,86'), certo.naTela);
+
+  // dado já guardado antes da correção: o mínimo é limitado e a tela avisa
+  await page.evaluate(async () => {
+    const { commit } = await import('./src/ui/app.js');
+    await commit((d) => { d.debts[0].minPaymentRate = 36.5; });
+  });
+  await page.waitForTimeout(600);
+  const velho = await page.evaluate(() => ({
+    avisa: document.body.innerText.includes('Confira esta dívida'),
+    minimos: (document.body.innerText.match(/Mínimos obrigatórios\s*R\$\s*[\d.,]+/) || [''])[0],
+  }));
+  ok('dado antigo impossível nunca passa do saldo', velho.minimos.includes('3.732,39'), velho.minimos);
+  ok('e a tela pede para corrigir em vez de fingir', velho.avisa);
+
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
 // ------------------------------------------------------ confirmar por escrito
 //
 // Existe porque a confirmação exigia "APAGAR" em maiúsculas e o teclado do

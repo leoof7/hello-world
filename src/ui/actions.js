@@ -10,7 +10,7 @@ import { monthKey, formatShort } from '../core/dates.js';
 import { parseEntry } from '../core/parse.js';
 import { expand } from '../core/installments.js';
 import { learn } from '../core/categorize.js';
-import { KIND } from '../core/debts.js';
+import { KIND, validateDebt } from '../core/debts.js';
 import { MERCHANTS } from '../seed/categories.js';
 import * as db from '../data/db.js';
 import { buildBackup, readBackup, deliver, backupFilename, backupStatus, markDone, readFile } from '../data/backup.js';
@@ -833,57 +833,101 @@ async function editarCartao(id) {
   toast('Salvo.');
 }
 
+const pctParaFracao = (v) => {
+  const n = Number(String(v).replace('%', '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n / 100 : 0;
+};
+
+/**
+ * Traduz o motivo que o núcleo apontou numa frase que diz o que fazer.
+ *
+ * O engano que isto barra: digitar reais no campo de por cento. Foi assim que
+ * uma dívida de R$ 3.732 passou a exigir R$ 136.232 de mínimo — "3650" lido
+ * como 3650% do saldo.
+ */
+function conferirDivida(r) {
+  const motivo = validateDebt({
+    balanceCents: Math.abs(r.saldo || 0),
+    monthlyRate: r.kind === KIND.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
+    minPaymentRate: pctParaFracao(r.minimoPct),
+    minPaymentCents: r.minimoFixo,
+  });
+
+  return {
+    'minimo-acima-de-100': `${r.minimoPct}% do saldo não existe — o máximo é 100. Se ${r.minimoPct} é um valor em reais, apague daqui e use o campo de baixo.`,
+    'juros-acima-de-100': `${r.taxa}% ao mês custaria mais que a dívida inteira todo mês. Rotativo fica perto de 15.`,
+    'minimo-maior-que-saldo': 'O mínimo fixo ficou maior que o saldo devedor. Confira os dois valores.',
+  }[motivo] || null;
+}
+
 async function editarDivida(id) {
   const d0 = id ? app.doc.debts.find((x) => x.id === id) : null;
-  const r = await form(d0 ? 'Editar dívida' : 'Nova dívida',
-    'A taxa vem escrita na fatura e no extrato — procure "juros do rotativo" ou "juros do cheque especial". É ela que decide a ordem de pagamento.',
-    [
-      { name: 'name', label: 'Nome', type: 'text', value: d0?.name || '', placeholder: 'Fatura atrasada · Nubank' },
-      { name: 'kind', label: 'Tipo', type: 'select', value: d0?.kind || KIND.REVOLVING,
-        options: [
-          { value: KIND.REVOLVING, label: 'Rotativo do cartão' },
-          { value: KIND.OVERDRAFT, label: 'Cheque especial' },
-          { value: KIND.LOAN, label: 'Empréstimo' },
-          { value: KIND.INSTALLMENT, label: 'Parcelamento já contratado' },
-        ] },
-      { name: 'saldo', label: 'Quanto deve hoje', type: 'money', value: Math.abs(d0?.balanceCents || 0) },
-      { name: 'taxa', label: 'Juros ao mês (%)', type: 'text', value: d0 ? String((d0.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
-        hint: 'rotativo costuma ficar entre 12% e 16%; cheque especial no teto de 8%' },
-      { name: 'minimoPct', label: 'Pagamento mínimo (% do saldo)', type: 'text',
-        value: d0?.minPaymentRate ? String((d0.minPaymentRate * 100).toFixed(0)) : '',
-        hint: 'cartão costuma exigir 15%. Deixe vazio se for valor fixo' },
-      { name: 'minimoFixo', label: 'Ou mínimo fixo por mês', type: 'money', value: d0?.minPaymentCents || 0 },
-    ], { ok: 'Salvar', apagar: d0 ? 'Quitei esta dívida' : null });
-  if (!r) return;
 
-  if (r.__apagar) {
-    await commit((d) => { d.debts = d.debts.filter((x) => x.id !== id); });
-    toast('Uma a menos. É assim que acaba.');
+  // Começa com o que já está salvo e passa a valer o que a pessoa digitou: se
+  // um campo estiver errado, a folha volta com tudo preenchido. Fechar o
+  // formulário e jogar fora seis campos por causa de um número é o tipo de
+  // coisa que faz desistir de cadastrar.
+  let atual = {
+    name: d0?.name || '',
+    kind: d0?.kind || KIND.REVOLVING,
+    saldo: Math.abs(d0?.balanceCents || 0),
+    taxa: d0 ? String((d0.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
+    minimoPct: d0?.minPaymentRate ? String((d0.minPaymentRate * 100).toFixed(0)) : '',
+    minimoFixo: d0?.minPaymentCents || 0,
+  };
+  let erro = null;
+
+  while (true) {
+    const r = await form(d0 ? 'Editar dívida' : 'Nova dívida',
+      erro || 'A taxa vem escrita na fatura e no extrato — procure "juros do rotativo" ou "juros do cheque especial". É ela que decide a ordem de pagamento.',
+      [
+        { name: 'name', label: 'Nome', type: 'text', value: atual.name, placeholder: 'Fatura atrasada · Nubank' },
+        { name: 'kind', label: 'Tipo', type: 'select', value: atual.kind,
+          options: [
+            { value: KIND.REVOLVING, label: 'Rotativo do cartão' },
+            { value: KIND.OVERDRAFT, label: 'Cheque especial' },
+            { value: KIND.LOAN, label: 'Empréstimo' },
+            { value: KIND.INSTALLMENT, label: 'Parcelamento já contratado' },
+          ] },
+        { name: 'saldo', label: 'Quanto deve hoje', type: 'money', value: atual.saldo },
+        { name: 'taxa', label: 'Juros ao mês (%)', type: 'text', value: atual.taxa,
+          hint: 'só o número. Rotativo costuma ficar entre 12 e 16; cheque especial no teto de 8' },
+        { name: 'minimoPct', label: 'Mínimo: quantos POR CENTO do saldo', type: 'text', value: atual.minimoPct,
+          hint: 'só o número, sem R$. Cartão costuma exigir 15. Se o seu mínimo é um valor fixo em reais, deixe vazio e use o campo abaixo' },
+        { name: 'minimoFixo', label: 'Ou mínimo fixo por mês, em reais', type: 'money', value: atual.minimoFixo },
+      ], { ok: 'Salvar', apagar: d0 ? 'Quitei esta dívida' : null });
+
+    if (!r) return;
+
+    if (r.__apagar) {
+      await commit((d) => { d.debts = d.debts.filter((x) => x.id !== id); });
+      toast('Uma a menos. É assim que acaba.');
+      return;
+    }
+
+    atual = r;
+    erro = conferirDivida(r);
+    if (erro) { toast(erro); continue; }
+
+    const registro = {
+      id: id || novoId('dv'),
+      name: r.name || 'Dívida',
+      kind: r.kind,
+      balanceCents: Math.abs(r.saldo),
+      monthlyRate: r.kind === KIND.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
+      minPaymentRate: pctParaFracao(r.minimoPct),
+      minPaymentCents: r.minimoFixo,
+      since: d0?.since || app.todayISO,
+    };
+
+    await commit((d) => {
+      d.debts = id ? d.debts.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.debts, registro];
+      const total = d.debts.reduce((a, x) => a + Math.abs(x.balanceCents), 0);
+      if (total > (d.profile.debtPeakCents || 0)) d.profile.debtPeakCents = total;
+    });
+    toast('Salvo.');
     return;
   }
-
-  const pct = (v) => {
-    const n = Number(String(v).replace('%', '').replace(',', '.'));
-    return Number.isFinite(n) && n > 0 ? n / 100 : 0;
-  };
-
-  const registro = {
-    id: id || novoId('dv'),
-    name: r.name || 'Dívida',
-    kind: r.kind,
-    balanceCents: Math.abs(r.saldo),
-    monthlyRate: r.kind === KIND.INSTALLMENT ? 0 : pct(r.taxa),
-    minPaymentRate: pct(r.minimoPct),
-    minPaymentCents: r.minimoFixo,
-    since: d0?.since || app.todayISO,
-  };
-
-  await commit((d) => {
-    d.debts = id ? d.debts.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.debts, registro];
-    const total = d.debts.reduce((a, x) => a + Math.abs(x.balanceCents), 0);
-    if (total > (d.profile.debtPeakCents || 0)) d.profile.debtPeakCents = total;
-  });
-  toast('Salvo.');
 }
 
 async function editarCofrinho(id) {

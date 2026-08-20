@@ -30,6 +30,42 @@ export function monthlyInterest(debt) {
   return Math.round(Math.abs(debt.balanceCents) * (debt.monthlyRate || 0));
 }
 
+/**
+ * O mínimo que uma dívida exige neste mês.
+ *
+ * Existe como função única porque a regra estava escrita em três lugares e
+ * só um deles limitava ao saldo. O resultado apareceu na tela: uma dívida de
+ * R$ 3.732 pedindo R$ 136.232 de mínimo. Ninguém deve mais do que deve — o
+ * teto é o próprio saldo, sempre.
+ *
+ * `minPaymentRate` é fração (0,15 = 15%). Acima de 1 seria "pague mais que o
+ * saldo inteiro", o que não existe: vem de engano de digitação e fica preso
+ * em 1 aqui, além de ser recusado na entrada.
+ */
+export function minimumOf(debt) {
+  const saldo = Math.abs(debt.balanceCents || 0);
+  if (saldo <= 0) return 0;
+  const taxa = Math.min(1, Math.max(0, debt.minPaymentRate || 0));
+  const fixo = Math.abs(debt.minPaymentCents || 0);
+  return Math.min(saldo, Math.max(fixo, Math.round(saldo * taxa)));
+}
+
+/**
+ * Confere se uma dívida é possível antes de ser guardada. Devolve o motivo em
+ * texto, ou null quando está tudo bem.
+ *
+ * Vive no núcleo, e não na tela, porque é regra de domínio: nenhuma dívida no
+ * mundo exige mais de 100% do saldo por mês, nem cobra mais juros que o próprio
+ * saldo. Aqui dá para testar sem abrir navegador.
+ */
+export function validateDebt({ balanceCents = 0, monthlyRate = 0, minPaymentRate = 0, minPaymentCents = 0 } = {}) {
+  const saldo = Math.abs(balanceCents);
+  if (minPaymentRate > 1) return 'minimo-acima-de-100';
+  if (monthlyRate > 1) return 'juros-acima-de-100';
+  if (saldo > 0 && Math.abs(minPaymentCents) > saldo) return 'minimo-maior-que-saldo';
+  return null;
+}
+
 export const totalBalance = (debts) => sum(debts.map((d) => Math.abs(d.balanceCents)));
 export const totalDailyInterest = (debts) => sum(debts.map(dailyInterest));
 export const totalMonthlyInterest = (debts) => sum(debts.map(monthlyInterest));
@@ -77,14 +113,15 @@ export function payoffPlan(debts, budgetCents, { method = 'avalanche', fromMonth
     paidOffMonth: null,
   }));
 
-  const minimumOf = (s) =>
-    Math.min(s.balance, Math.max(s.minFixed, Math.round(s.balance * s.minRate)));
+  // A mesma regra do resto do app, aplicada ao saldo que vai mudando no tempo.
+  const minimoDoMes = (s) =>
+    minimumOf({ balanceCents: s.balance, minPaymentCents: s.minFixed, minPaymentRate: s.minRate });
 
   const months = [];
   let totalInterest = 0;
   let m = 0;
 
-  const minimumsTotal = sum(saldos.map(minimumOf));
+  const minimumsTotal = sum(saldos.map(minimoDoMes));
   const viable = budgetCents >= minimumsTotal;
 
   while (saldos.some((s) => s.balance > 0) && m < maxMonths) {
@@ -105,7 +142,7 @@ export function payoffPlan(debts, budgetCents, { method = 'avalanche', fromMonth
     const pagamentos = [];
     for (const s of saldos) {
       if (s.balance <= 0) continue;
-      const pago = Math.min(minimumOf(s), s.balance, disponivel);
+      const pago = Math.min(minimoDoMes(s), s.balance, disponivel);
       s.balance -= pago;
       disponivel -= pago;
       if (pago > 0) pagamentos.push({ id: s.id, cents: pago, kind: 'mínimo' });
@@ -165,17 +202,12 @@ export function comparePlans(planA, planB) {
  * Serve para mostrar o custo de não ter plano.
  */
 export function minimumOnlyPlan(debts, options = {}) {
-  const minimos = sum(debts.map((d) =>
-    Math.max(Math.abs(d.minPaymentCents || 0), Math.round(Math.abs(d.balanceCents) * (d.minPaymentRate || 0)))
-  ));
-  return payoffPlan(debts, minimos, options);
+  return payoffPlan(debts, minimumsToday(debts), options);
 }
 
 /** O mínimo que o mês exige. Se o orçamento não cobre isso, não existe plano. */
 export function minimumsToday(debts) {
-  return sum(debts.map((d) =>
-    Math.max(Math.abs(d.minPaymentCents || 0), Math.round(Math.abs(d.balanceCents) * (d.minPaymentRate || 0)))
-  ));
+  return sum(debts.map(minimumOf));
 }
 
 /**

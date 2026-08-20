@@ -567,6 +567,14 @@ function dividaCard(d, i, plano, v) {
   const nome = { [KIND.REVOLVING]: 'Rotativo', [KIND.OVERDRAFT]: 'Cheque especial', [KIND.LOAN]: 'Empréstimo', [KIND.INSTALLMENT]: 'Parcelamento' }[d.kind] || 'Dívida';
   const quitacao = plano?.payoffByDebt?.find((p) => p.id === d.id)?.month;
   const anual = d.monthlyRate ? Math.pow(1 + d.monthlyRate, 12) - 1 : 0;
+
+  // Dado já guardado antes de o app passar a barrar valores impossíveis. O
+  // cálculo não usa mais esse número solto, mas quem cadastrou precisa saber
+  // que ele está errado — em vez de o app fingir que está tudo certo.
+  const implausivel = (d.minPaymentRate || 0) > 1
+    ? `${(d.minPaymentRate * 100).toFixed(0)}% de pagamento mínimo`
+    : (d.monthlyRate || 0) > 1 ? `${(d.monthlyRate * 100).toFixed(0)}% de juros ao mês` : null;
+
   return `<div class="debt">
     <div class="top">
       <div>
@@ -585,6 +593,12 @@ function dividaCard(d, i, plano, v) {
       <span class="num" style="font-size:12px;color:var(--red)">${m(Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
     ${quitacao ? `<div class="ft"><span style="font-size:11px;color:var(--muted)">Quita em</span>
       <span class="num" style="font-size:12px;color:var(--jade)">${formatMonthKey(quitacao)}</span></div>` : ''}
+    ${implausivel ? `<button class="nudge crit" data-act="editar-divida" data-id="${esc(d.id)}" style="margin:10px 0 0;width:100%">
+      <span class="ic">${icon('alerta')}</span>
+      <div><b>Confira esta dívida</b><i>está cadastrada com ${esc(implausivel)}, o que não existe.
+        Provavelmente um valor em reais foi digitado no campo de porcentagem. Toque para corrigir.</i></div>
+      <span class="arr">${icon('seta')}</span>
+    </button>` : ''}
   </div>`;
 }
 

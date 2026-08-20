@@ -225,3 +225,73 @@ test('separa gasto fixo de variável', () => {
   assert.equal(r.variableCents, 89210);
   assert.ok(r.fixedRatio > 0.7);
 });
+
+// ---------------------------------------------- o mínimo nunca passa do saldo
+//
+// Estes existem porque a regra do mínimo estava escrita em três lugares e só
+// um deles limitava ao saldo. Na tela, uma dívida de R$ 3.732 apareceu pedindo
+// R$ 136.232 de mínimo — o valor tinha sido digitado no campo de porcentagem.
+
+test('o mínimo de uma dívida nunca passa do saldo devedor', async () => {
+  const { minimumOf, minimumsToday } = await import('../src/core/debts.js');
+  const absurda = { balanceCents: 373239, monthlyRate: 0.16, minPaymentRate: 36.5 };
+  assert.equal(minimumOf(absurda), 373239, 'no pior caso, o mínimo é o saldo inteiro');
+  assert.equal(minimumsToday([absurda]), 373239);
+});
+
+test('mínimo fixo maior que o saldo também é limitado', async () => {
+  const { minimumOf } = await import('../src/core/debts.js');
+  assert.equal(minimumOf({ balanceCents: 100000, minPaymentCents: 900000 }), 100000);
+});
+
+test('percentual normal de cartão continua valendo', async () => {
+  const { minimumOf } = await import('../src/core/debts.js');
+  assert.equal(minimumOf({ balanceCents: 373239, minPaymentRate: 0.15 }), 55986);
+});
+
+test('dívida quitada não exige mínimo nenhum', async () => {
+  const { minimumOf } = await import('../src/core/debts.js');
+  assert.equal(minimumOf({ balanceCents: 0, minPaymentRate: 0.15, minPaymentCents: 50000 }), 0);
+});
+
+test('vale o maior entre o percentual e o fixo, dentro do saldo', async () => {
+  const { minimumOf } = await import('../src/core/debts.js');
+  const d = { balanceCents: 100000, minPaymentRate: 0.05, minPaymentCents: 8000 };
+  assert.equal(minimumOf(d), 8000, '5% dá 5.000; o fixo de 8.000 é maior e vence');
+});
+
+test('as três contas de mínimo do app concordam entre si', async () => {
+  const { minimumsToday, payoffPlan, minimumOnlyPlan } = await import('../src/core/debts.js');
+  const dividas = [
+    { id: 'a', name: 'Rotativo', kind: 'revolving', balanceCents: 648000, monthlyRate: 0.149, minPaymentRate: 0.15 },
+    { id: 'b', name: 'Cheque', kind: 'overdraft', balanceCents: 320000, monthlyRate: 0.08, minPaymentCents: 20000 },
+  ];
+  const hoje = minimumsToday(dividas);
+  const plano = payoffPlan(dividas, hoje, { fromMonth: '2026-08' });
+  assert.equal(plano.minimumsTotalCents, hoje, 'payoffPlan usa a mesma regra');
+  assert.equal(minimumOnlyPlan(dividas, { fromMonth: '2026-08' }).minimumsTotalCents, hoje);
+  assert.ok(plano.viable, 'pagando exatamente os mínimos, o plano é viável');
+});
+
+test('dívida impossível é recusada antes de virar dado guardado', async () => {
+  const { validateDebt } = await import('../src/core/debts.js');
+  // o caso real: "3650" digitado no campo de porcentagem
+  assert.equal(validateDebt({ balanceCents: 373239, minPaymentRate: 36.5 }), 'minimo-acima-de-100');
+  assert.equal(validateDebt({ balanceCents: 373239, monthlyRate: 16 }), 'juros-acima-de-100');
+  assert.equal(validateDebt({ balanceCents: 100000, minPaymentCents: 900000 }), 'minimo-maior-que-saldo');
+});
+
+test('dívida plausível passa sem reclamação', async () => {
+  const { validateDebt } = await import('../src/core/debts.js');
+  assert.equal(validateDebt({ balanceCents: 648000, monthlyRate: 0.149, minPaymentRate: 0.15 }), null);
+  assert.equal(validateDebt({ balanceCents: 320000, monthlyRate: 0.08, minPaymentCents: 20000 }), null);
+  assert.equal(validateDebt({}), null, 'formulário em branco não é erro');
+  assert.equal(validateDebt({ balanceCents: 0, minPaymentCents: 50000 }), null,
+    'sem saldo não dá para comparar mínimo com saldo');
+});
+
+test('100% de mínimo é o limite e ainda é aceito', async () => {
+  const { validateDebt, minimumOf } = await import('../src/core/debts.js');
+  assert.equal(validateDebt({ balanceCents: 100000, minPaymentRate: 1 }), null);
+  assert.equal(minimumOf({ balanceCents: 100000, minPaymentRate: 1 }), 100000);
+});
