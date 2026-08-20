@@ -348,6 +348,20 @@ const ACOES = {
   async 'editar-conta'({ id }) { await editarConta(id); },
   async 'novo-cartao'() { await editarCartao(null); },
   async 'editar-cartao'({ id }) { await editarCartao(id); },
+  async 'marcar-fatura-paga'({ card, cycle }) {
+    await commit((d) => {
+      d.faturasPagas = d.faturasPagas || [];
+      const chave = `${card}|${cycle}`;
+      if (!d.faturasPagas.includes(chave)) d.faturasPagas.push(chave);
+    });
+    toast('Fatura marcada como paga.');
+  },
+  async 'desmarcar-fatura-paga'({ card, cycle }) {
+    await commit((d) => {
+      const chave = `${card}|${cycle}`;
+      d.faturasPagas = (d.faturasPagas || []).filter((x) => x !== chave);
+    });
+  },
 
   // ---- dívidas ----
   async 'nova-divida'() { await editarDivida(null); },
@@ -805,9 +819,14 @@ async function editarLancamento(id, sugestao = {}) {
   // modelo: "onde" já É a resposta — conta é débito, cartão é crédito. O que
   // faltava era deixar isso escrito, e parar de pedir parcelas ou "entrada
   // avulsa" quando isso não faz sentido pro que está sendo lançado agora.
+  // Cartão com conta vinculada é físico-único mas função dupla: crédito vai
+  // pra fatura, débito desconta na hora da conta ligada a ele.
   const opcoesOrigemSaida = () => [
     ...app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: `${a.name} — débito` })),
-    ...app.doc.cards.map((c) => ({ value: `cd:${c.id}`, label: `${c.name} — crédito` })),
+    ...app.doc.cards.flatMap((c) => [
+      { value: `cd:${c.id}`, label: `${c.name} — crédito` },
+      ...(c.accountId ? [{ value: `ac:${c.accountId}`, label: `${c.name} — débito` }] : []),
+    ]),
   ];
   const opcoesOrigemEntrada = () => app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: a.name }));
 
@@ -877,6 +896,30 @@ async function editarLancamento(id, sugestao = {}) {
   const cardId = tipo === 'cd' ? origemId : null;
   const accountId = tipo === 'ac' ? origemId : null;
   const sinal = entradaFinal ? 1 : -1;
+
+  // Só barra em lançamento novo: editar um já existente compara valor novo
+  // contra limite que já conta o valor antigo, e isso merece conta própria
+  // que não vale a pena agora.
+  if (!id && !entradaFinal) {
+    if (cardId) {
+      const cartao = app.view.cartoes.find((c) => c.id === cardId);
+      if (cartao?.limitCents && Math.abs(r.valor) > cartao.availableCents) {
+        toast(`Passa do limite — só ${brl(cartao.availableCents)} disponível no ${cartao.name}.`);
+        return;
+      }
+    }
+    if (accountId) {
+      const conta = app.doc.accounts.find((a) => a.id === accountId);
+      if (conta && conta.balanceCents >= 0 && Math.abs(r.valor) > conta.balanceCents) {
+        const ok = await confirmar({
+          titulo: 'Isso deixa a conta negativa',
+          texto: `${conta.name} tem ${brl(conta.balanceCents)} disponível. Lançar ${brl(Math.abs(r.valor))} deixa o saldo em ${brl(conta.balanceCents - Math.abs(r.valor))}.`,
+          ok: 'Lançar assim mesmo',
+        });
+        if (!ok) return;
+      }
+    }
+  }
 
   // Parcelamento é caso à parte: uma compra vira N lançamentos, cada um na sua
   // fatura. Sem isso a projeção mente.
@@ -1018,6 +1061,9 @@ async function editarCartao(id) {
           { value: 'amber', label: 'Âmbar' }, { value: 'violet', label: 'Roxo' },
           { value: 'graphite', label: 'Grafite' },
         ] },
+      { name: 'accountId', label: 'Também é débito de', type: 'select', value: c?.accountId || '',
+        options: [{ value: '', label: 'Não — só crédito' }, ...app.doc.accounts.map((a) => ({ value: a.id, label: a.name }))],
+        hint: 'se o mesmo cartão físico debita direto de uma conta, escolha ela aqui — o Lançar passa a oferecer as duas opções' },
     ], { ok: 'Salvar', apagar: c ? 'Apagar cartão' : null });
   if (!r) return;
 
@@ -1044,6 +1090,7 @@ async function editarCartao(id) {
     dueDay: dia(r.dueDay, 27),
     limitCents: r.limite,
     color: r.color,
+    accountId: r.accountId || null,
   };
   await commit((d) => {
     d.cards = id ? d.cards.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.cards, registro];

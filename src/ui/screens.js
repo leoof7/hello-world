@@ -514,8 +514,15 @@ function faturaCartao(c, v) {
       <b class="num">${m(c.openCents)}</b>
     </div>
     ${s ? `<div class="ft" style="margin:0 0 10px">
-      <span class="s" style="font-size:11px;color:var(--muted)">A pagar · vence ${formatShort(s.dueDate)}</span>
+      <span class="s" style="font-size:11px;color:${c.nextStatementPaga ? 'var(--jade)' : 'var(--muted)'}">${c.nextStatementPaga ? `Paga · vencia ${formatShort(s.dueDate)}` : `A pagar · vence ${formatShort(s.dueDate)}`}</span>
       <b class="num">${m(s.totalCents)}</b>
+    </div>
+    <div class="btns" style="margin:0 0 10px">
+      <button class="btn ${c.nextStatementPaga ? 'ghost' : 'primary'}" style="width:100%;padding:9px"
+        data-act="${c.nextStatementPaga ? 'desmarcar-fatura-paga' : 'marcar-fatura-paga'}"
+        data-card="${esc(c.id)}" data-cycle="${esc(s.cycleId)}">
+        ${c.nextStatementPaga ? 'Desmarcar — ainda não paguei' : `${icon('check')} Marcar como paga`}
+      </button>
     </div>` : ''}
     ${c.overdue ? `<div class="nudge crit" style="margin:10px 0 0">
       <span class="ic">${icon('alerta')}</span>

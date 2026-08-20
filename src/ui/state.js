@@ -26,7 +26,8 @@ export function derive(doc, todayISO = today()) {
 
   // ---- faturas ----
   const faturas = statementsOf(doc, todayISO);
-  const cartoes = doc.cards.map((card) => cardView(card, doc, faturas, todayISO));
+  const pagas = new Set(doc.faturasPagas || []);
+  const cartoes = doc.cards.map((card) => cardView(card, doc, faturas, todayISO, pagas));
 
   // ---- parcelas ----
   const parcelas = doc.transactions.filter((t) => t.installment);
@@ -48,10 +49,13 @@ export function derive(doc, todayISO = today()) {
   const guardadoCents = sum(doc.accounts.filter((a) => a.type === 'savings').map((a) => a.balanceCents));
   const investidoCents = sum(doc.accounts.filter((a) => a.type === 'investment').map((a) => a.balanceCents));
 
+  // Fatura marcada como paga já saiu do bolso — não é mais saída futura,
+  // senão a projeção mostraria um dinheiro que já foi embora como se ainda
+  // fosse sair de novo.
   const eventos = buildEvents(
     {
       recurring: doc.recurring || [],
-      statements: faturas.futuras,
+      statements: faturas.futuras.filter((s) => !pagas.has(`${s.cardId}|${s.cycleId}`)),
       scheduled: minimosAgendados(doc.debts, todayISO),
     },
     todayISO,
@@ -285,16 +289,18 @@ export function statementsOf(doc, todayISO = today()) {
 }
 
 /** A visão de um cartão: fatura aberta, próxima a vencer, limite usado. */
-function cardView(card, doc, faturas, todayISO) {
+function cardView(card, doc, faturas, todayISO, pagas = new Set()) {
   const aberta = openCycle(card, todayISO);
   const doCartao = faturas.porCartao(card.id);
   const atual = doCartao.find((s) => s.cycleId === aberta.id);
   const fechadas = doCartao.filter((s) => s.closeDate < todayISO && s.dueDate >= todayISO);
   const proxima = doCartao.find((s) => s.dueDate >= todayISO);
   const atraso = doc.debts.find((d) => d.cardId === card.id);
+  const proximaPaga = proxima ? pagas.has(`${proxima.cardId}|${proxima.cycleId}`) : false;
 
+  // Fatura paga não pesa mais no limite usado — o dinheiro já saiu de verdade.
   const usadoCents =
-    sum(doCartao.filter((s) => s.dueDate >= todayISO).map((s) => s.totalCents)) +
+    sum(doCartao.filter((s) => s.dueDate >= todayISO && !pagas.has(`${s.cardId}|${s.cycleId}`)).map((s) => s.totalCents)) +
     Math.abs(atraso?.balanceCents || 0);
 
   return {
@@ -304,6 +310,7 @@ function cardView(card, doc, faturas, todayISO) {
     openItems: atual?.items || [],
     closedStatements: fechadas,
     nextStatement: proxima || null,
+    nextStatementPaga: proximaPaga,
     overdue: atraso || null,
     usedCents: usadoCents,
     availableCents: Math.max(0, (card.limitCents || 0) - usadoCents),

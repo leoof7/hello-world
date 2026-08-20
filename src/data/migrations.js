@@ -32,6 +32,7 @@ export function emptyDocument() {
     budgets: {},       // categoriaId → teto em centavos
     goals: [],         // cofrinhos e metas com prazo
     assets: [],        // bens: carro, moto, casa — valor estimado, entram no patrimônio
+    faturasPagas: [],  // "cardId|cycleId" das faturas que a pessoa confirmou ter pago
     snapshots: [],     // patrimônio mês a mês, digitado à mão
     settings: {
       theme: 'auto',
