@@ -482,6 +482,44 @@ const ACOES = {
     await entregar(buildCalendar(faturas), 'zero-vencimentos.ics', 'text/calendar');
   },
 
+  /** Instala a versão nova que já está baixada e esperando. */
+  async atualizar() {
+    const { instalarAtualizacao, forcarAtualizacao } = await import('./app.js');
+    toast('Instalando a versão nova…');
+    if (await instalarAtualizacao()) return; // o recarregamento vem sozinho
+    await forcarAtualizacao();
+  },
+
+  /**
+   * Procura versão nova na hora.
+   *
+   * Existe porque um app instalado na tela inicial só checa o servidor de vez
+   * em quando, e depois de publicar uma correção é natural querer buscar já.
+   */
+  async 'buscar-atualizacao'() {
+    const registro = await navigator.serviceWorker?.getRegistration();
+    if (!registro) { location.reload(); return; }
+
+    toast('Procurando…');
+    await registro.update().catch(() => {});
+    await new Promise((r) => setTimeout(r, 1200));
+
+    if (registro.waiting || registro.installing) {
+      const { instalarAtualizacao } = await import('./app.js');
+      await instalarAtualizacao();
+      return;
+    }
+
+    const ok = await confirmar({
+      titulo: 'Você já está na versão mais nova',
+      texto: 'Se mesmo assim o app parecer desatualizado, dá para jogar fora a cópia guardada e baixar tudo de novo. Isso NÃO apaga os seus dados — eles ficam no cofre, não no cache.',
+      ok: 'Baixar tudo de novo',
+    });
+    if (!ok) return;
+    const { forcarAtualizacao } = await import('./app.js');
+    await forcarAtualizacao();
+  },
+
   async seguranca() {
     const meta = await db.readMeta();
     const espaco = await db.estimate();
@@ -510,16 +548,24 @@ const ACOES = {
           <i>${espaco ? `${(espaco.usageBytes / 1024).toFixed(0)} KB usados de ${(espaco.quotaBytes / 1048576).toFixed(0)} MB disponíveis` : 'o navegador não informou'}</i></div></div>
         <div class="gi"><span class="bx dot ${app.backup?.due ? 'a' : ''}"></span>
           <div><b>Backup</b><i>${esc(app.backup ? resumoBackup(app.backup) : 'nunca feito')}</i></div></div>
+        <div class="gi"><span class="bx dot"></span>
+          <div><b>Atualizações</b><i>chegam sozinhas quando você abre o app com internet.
+            Atualizar troca só o programa — os seus dados ficam no cofre e não são tocados.</i></div></div>
       </div>
       <div class="btns"><button class="btn ghost" data-cal="1">${icon('relogio')} Vencimentos no Calendário</button></div>
+      <div class="btns"><button class="btn ghost" data-upd="1">${icon('download')} Buscar atualização</button></div>
       <div class="btns"><button class="btn primary" data-x="1" style="width:100%">Fechar</button></div>`,
       {
         onMount: (card, fechar) => {
           card.querySelector('[data-x]').onclick = () => fechar(null);
           card.querySelector('[data-cal]').onclick = () => fechar('cal');
+          card.querySelector('[data-upd]').onclick = () => fechar('upd');
         },
       }
-    ).then((r) => { if (r === 'cal') return ACOES.calendario(); });
+    ).then((r) => {
+      if (r === 'cal') return ACOES.calendario();
+      if (r === 'upd') return ACOES['buscar-atualizacao']();
+    });
   },
 
   /**

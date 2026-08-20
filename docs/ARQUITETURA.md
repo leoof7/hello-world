@@ -113,7 +113,36 @@ perde os dados dos usuários na terceira atualização.
 
 ---
 
-## 7. Sem framework, sem build
+## 7. Service worker: rede primeiro, não cache primeiro
+
+Um PWA instalado que serve o cache antes da rede vira um app **congelado**: a
+pessoa nunca mais recebe correção nenhuma, e a única saída é apagar o site.
+Foi exatamente o que aconteceu na primeira versão daqui.
+
+A receita comum é bater o nome do cache a cada publicação. É frágil pelo motivo
+óbvio: basta esquecer uma vez. Então a estratégia é a outra:
+
+- **arquivos do app** → rede primeiro, cache como rede de segurança. Online, você
+  roda o que está publicado. Offline, o cache abre o app.
+- **fontes** → cache primeiro. Não mudam.
+
+Duas armadilhas que o "rede primeiro" ingênuo não cobre, e que só apareceram
+testando uma publicação de verdade no navegador:
+
+1. `fetch(req)` sozinho **não** vai à rede: o cache HTTP do navegador responde
+   no lugar do servidor e devolve a versão velha. Precisa de
+   `fetch(req, { cache: 'no-cache' })`, que revalida — 304 quando nada mudou.
+2. O próprio `sw.js` pode ficar até 24 h parado no cache HTTP. O registro usa
+   `updateViaCache: 'none'` para que a correção não chegue só no dia seguinte.
+
+E uma armadilha do lado do app: `clients.claim()` dispara `controllerchange`
+também na **primeira** instalação. Recarregar ali jogava a pessoa para fora do
+cadastro das doze palavras, no meio. Só recarrega quando já havia um
+controlador antes — quando é troca de versão de verdade.
+
+---
+
+## 8. Sem framework, sem build
 
 Sem React, sem bundler, sem `node_modules`. Cada tela devolve HTML como string
 e o render troca o conteúdo de uma vez.
@@ -131,7 +160,7 @@ próprio e animação entre elas, o custo se inverte. Não é o caso hoje.
 
 ---
 
-## 8. Camadas
+## 9. Camadas
 
 ```
 src/core/    cálculo puro — sem DOM, sem IndexedDB, 100% testável
@@ -146,7 +175,7 @@ isso os testes cobrem o que aparece na tela sem precisar abrir navegador.
 
 ---
 
-## 9. `MODO = 'pessoal' | 'produto'`
+## 10. `MODO = 'pessoal' | 'produto'`
 
 `src/config.js` tem a chave que decide o que fica ligado:
 
@@ -179,7 +208,7 @@ só vale quando houver receita para justificar.
 
 ---
 
-## 10. O que ficou de fora, e por quê
+## 11. O que ficou de fora, e por quê
 
 | Do PDF original | Decisão |
 |---|---|

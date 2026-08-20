@@ -347,6 +347,76 @@ const guia = async (page) => {
   await ctx.close();
 }
 
+// -------------------------------------------------- atualização chega sozinha
+//
+// A pergunta que este bloco responde: publicando uma versão nova, o app
+// instalado busca sozinho — e os dados sobrevivem?
+//
+// Existe porque a resposta já foi "não": o service worker era cache primeiro e
+// servia a mesma versão para sempre. Depois, mesmo com rede primeiro, o cache
+// HTTP do navegador respondia no lugar do servidor.
+
+{
+  console.log('\natualização');
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const raiz = fileURLToPath(new URL('..', import.meta.url));
+  const alvo = `${raiz}src/ui/screens.js`;
+  const original = readFileSync(alvo, 'utf8');
+
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => console.log('  pageerror:', e.message));
+
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#anotei', { timeout: 20000 });
+    const palavras = await page.$$eval('.word .w', (els) => els.map((e) => e.textContent.trim()));
+    await page.click('#anotei');
+    await page.waitForSelector('#conf');
+    const pos = await page.$$eval('input[data-p]', (els) => els.map((e) => Number(e.dataset.p)));
+    for (const p of pos) await page.fill(`input[data-p="${p}"]`, palavras[p]);
+    await page.click('#conf');
+    await page.waitForSelector('#pw', { timeout: 20000 });
+    await page.fill('#pw', SENHA);
+    await page.click('#ok');
+    await page.waitForSelector('#exemplo', { timeout: 20000 });
+    await page.click('#exemplo');
+    await page.waitForSelector('.tabbar', { timeout: 20000 });
+
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, { timeout: 20000 });
+    ok('o service worker assume o controle', true);
+    ok('e o cadastro inicial NÃO é interrompido por recarregamento',
+      await page.evaluate(() => !!document.querySelector('.tabbar')));
+
+    const antes = await page.evaluate(async () => (await import('./src/ui/app.js')).app.doc.transactions.length);
+
+    // "publica" uma versão nova mudando um texto visível
+    writeFileSync(alvo, original.replace('Últimos lançamentos', 'MARCADOR-DE-VERSAO-NOVA'));
+
+    // a pessoa fecha e abre o app
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#pw', { timeout: 20000 });
+    await page.fill('#pw', SENHA);
+    await page.click('#ok');
+    await page.waitForSelector('.tabbar', { timeout: 20000 });
+    await page.waitForTimeout(1500);
+
+    ok('a versão nova chega só de abrir o app',
+      await page.evaluate(() => document.body.innerText.includes('MARCADOR-DE-VERSAO-NOVA')));
+
+    const depois = await page.evaluate(async () => (await import('./src/ui/app.js')).app.doc.transactions.length);
+    ok('e os dados atravessam a atualização intactos', depois === antes && depois > 0,
+      `${antes} → ${depois} lançamentos`);
+
+    await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+    await ctx.close();
+  } finally {
+    // nunca deixar o repositório sujo, mesmo se algo acima falhar
+    writeFileSync(alvo, original);
+  }
+}
+
 await browser.close();
 
 console.log(falhas ? `\n${falhas} verificações falharam` : '\ntudo passou');

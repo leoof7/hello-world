@@ -34,11 +34,26 @@ export function render(app) {
   esconder = app.privacy;
   const tela = TELAS[app.screen] || TELAS.painel;
   document.getElementById('app').innerHTML = `
+    ${faixaAtualizacao(app)}
     ${faixaExemplo(app)}
     <div class="screens"><section class="screen active">${tela(app)}</section></div>
     ${tabbar(app.screen)}
   `;
   wire(app);
+}
+
+/**
+ * Faixa quando existe versão nova baixada e esperando.
+ *
+ * Atualizar não encosta nos seus dados — o service worker guarda o programa, o
+ * cofre mora no IndexedDB. A faixa diz isso, porque num app sem servidor a
+ * pergunta "vou perder o que digitei?" é legítima.
+ */
+function faixaAtualizacao(app) {
+  if (!app.atualizacao) return '';
+  return `<button class="atz" data-act="atualizar">
+    <b>Versão nova pronta</b><span>Toque para instalar · seus dados não são tocados</span>
+  </button>`;
 }
 
 /**

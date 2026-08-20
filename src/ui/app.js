@@ -34,6 +34,7 @@ export const app = {
   privacy: false,   // olho fechado esconde os valores
   todayISO: today(),
   backup: null,
+  atualizacao: null,  // service worker novo esperando para assumir
 };
 
 const TELAS = ['painel', 'cartoes', 'dividas', 'analise', 'tudo', 'cofrinhos', 'recebimentos', 'revisao', 'guia'];
@@ -518,6 +519,91 @@ async function main() {
   });
 }
 
+// ------------------------------------------------------------- atualizações
+//
+// Nada disto toca nos seus dados: o service worker guarda o PROGRAMA, e o seu
+// cofre mora no IndexedDB. Atualizar o app nunca pede backup nem apagar nada.
+
+/** Registra o service worker e avisa quando existe versão nova esperando. */
+async function cuidarDaVersao() {
+  if (!('serviceWorker' in navigator)) return;
+
+  // Precisa ser lido ANTES de registrar. Na primeira instalação não existe
+  // controlador, e o `clients.claim()` do service worker dispara um
+  // `controllerchange` que não é troca de versão — é a instalação inicial.
+  // Recarregar ali jogaria a pessoa para fora do cadastro das doze palavras.
+  const jaTinhaControlador = !!navigator.serviceWorker.controller;
+
+  let registro;
+  try {
+    // `updateViaCache: 'none'` obriga o navegador a buscar o próprio sw.js no
+    // servidor em vez de reusar a cópia HTTP, que pode ficar até 24 h parada.
+    // Sem isso, a correção que faz as atualizações chegarem só chegaria amanhã.
+    registro = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' });
+  } catch {
+    return; // sem service worker o app funciona igual, só não abre offline
+  }
+
+  const avisar = (esperando) => {
+    if (!esperando) return;
+    app.atualizacao = esperando;
+    if (app.doc) draw();
+  };
+
+  // já havia uma versão nova instalada e parada esperando
+  avisar(registro.waiting);
+
+  registro.addEventListener('updatefound', () => {
+    const nova = registro.installing;
+    nova?.addEventListener('statechange', () => {
+      // "installed" com um controlador ativo significa: já existe uma versão
+      // rodando e esta aqui é a substituta.
+      if (nova.state === 'installed' && navigator.serviceWorker.controller) avisar(nova);
+    });
+  });
+
+  // Troca de controlador → a versão nova assumiu; recarrega uma única vez.
+  // Só vale quando já havia uma versão rodando: ver o comentário acima.
+  let recarregando = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!jaTinhaControlador || recarregando) return;
+    recarregando = true;
+    location.reload();
+  });
+
+  // Procura versão nova ao abrir e sempre que o app volta do segundo plano,
+  // que num PWA de iPhone é o momento em que a pessoa realmente "abre" o app.
+  const procurar = () => registro.update().catch(() => {});
+  procurar();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') procurar();
+  });
+}
+
+/** Instala a versão que está esperando. Chamado pelo aviso e por Segurança. */
+export async function instalarAtualizacao() {
+  const registro = await navigator.serviceWorker?.getRegistration();
+  const esperando = app.atualizacao || registro?.waiting;
+  if (esperando) {
+    // o controllerchange acima recarrega assim que ela assumir
+    esperando.postMessage?.('pular-espera');
+    registro?.waiting?.postMessage?.('pular-espera');
+    return true;
+  }
+  return false;
+}
+
+/** Último recurso: joga fora todo o cache do programa e recarrega. */
+export async function forcarAtualizacao() {
+  if (self.caches) {
+    const chaves = await caches.keys();
+    await Promise.all(chaves.map((k) => caches.delete(k)));
+  }
+  const registro = await navigator.serviceWorker?.getRegistration();
+  await registro?.unregister().catch(() => {});
+  location.reload();
+}
+
 // Falhas em módulo não aparecem no console de um iPhone — mostra na tela.
 window.addEventListener('error', (e) => {
   if (!app.doc) {
@@ -526,6 +612,10 @@ window.addEventListener('error', (e) => {
   }
 });
 
+// O registro não depende do cofre: `main()` fica parado esperando o Face ID ou
+// as doze palavras, e quem parasse no meio do cadastro nunca teria o app
+// disponível offline. São duas coisas independentes e rodam em paralelo.
+cuidarDaVersao();
 main();
 
 export { PADROES, sheet };

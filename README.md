@@ -82,6 +82,25 @@ para quem abrisse as ferramentas de desenvolvedor.
 
 ---
 
+## Atualizações
+
+**Você nunca precisa fazer backup nem apagar nada para receber uma versão
+nova.** São duas coisas separadas e nunca se encostam:
+
+| | Onde mora | O que a atualização faz |
+|---|---|---|
+| **O programa** (telas, cálculos) | cache do service worker | é substituído |
+| **Os seus dados** (cofre cifrado) | IndexedDB | não é tocado |
+
+Como funciona na prática: abrindo o app com internet, ele checa se existe versão
+nova e a busca. Na maioria das vezes você nem percebe — abre e já está atualizado.
+Se a nova versão só ficar pronta depois que o app carregou, aparece uma faixa
+verde no topo: *"Versão nova pronta · toque para instalar"*.
+
+Se quiser forçar: *Tudo → Segurança e espaço → Buscar atualização*. Se ele disser
+que você já está na mais nova mas o app parecer velho, ali mesmo dá para jogar
+fora a cópia guardada e baixar tudo de novo — e isso também **não** apaga dados.
+
 ## Backup
 
 Um site não grava arquivo no seu disco sozinho — é regra de segurança do

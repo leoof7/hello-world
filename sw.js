@@ -1,13 +1,22 @@
 // Service worker.
 //
-// Estratégia: cache primeiro para o que é o app, rede nunca para os dados —
-// porque não existem dados na rede. Tudo que este arquivo guarda é o próprio
-// programa. O cofre vive no IndexedDB e o service worker nem o enxerga.
+// Estratégia: REDE PRIMEIRO para os arquivos do próprio app, cache primeiro só
+// para as fontes.
 //
-// Trocar CACHE ao publicar uma versão nova é o que faz o iPhone pegar a
-// atualização: o navegador serve o cache antigo até alguém apagá-lo.
+// A versão anterior fazia cache primeiro em tudo, e o resultado é que um app já
+// instalado nunca mais via uma atualização: o navegador servia o cache antigo
+// para sempre, e a única saída era apagar o site. Trocar uma constante a cada
+// publicação seria remédio frágil demais — bastava esquecer uma vez.
+//
+// Com rede primeiro, quem está online sempre roda a versão publicada, e quem
+// está offline continua abrindo pelo cache. O custo é uma ida à rede na
+// abertura; para um app deste tamanho, é ruído.
+//
+// O cofre vive no IndexedDB e o service worker nem o enxerga. Nada aqui toca
+// nos seus dados.
 
-const CACHE = 'zero-v1';
+const VERSAO = 'v2';
+const CACHE = `zero-${VERSAO}`;
 
 const ARQUIVOS = [
   './',
@@ -63,27 +72,64 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+/** Guarda a resposta boa e devolve ela. */
+async function guardar(req, resposta) {
+  if (resposta && resposta.ok) {
+    const copia = resposta.clone();
+    caches.open(CACHE).then((c) => c.put(req, copia)).catch(() => {});
+  }
+  return resposta;
+}
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
-  // As fontes do Google entram no cache na primeira visita e depois o app abre
-  // offline com a tipografia certa.
-  const externa = url.origin !== location.origin;
+  const propria = url.origin === location.origin;
 
+  // Fontes e afins: cache primeiro. Elas não mudam, e assim o app abre offline
+  // com a tipografia certa.
+  if (!propria) {
+    e.respondWith(
+      caches.match(req).then((achado) =>
+        achado || fetch(req).then((r) => guardar(req, r)).catch(() => achado)
+      )
+    );
+    return;
+  }
+
+  // Arquivos do app: rede primeiro, cache como rede de segurança.
+  //
+  // O `cache: 'no-cache'` não é exagero — sem ele o "rede primeiro" é mentira:
+  // o cache HTTP do próprio navegador responde no lugar do servidor e devolve
+  // a versão antiga sem sequer perguntar. Com ele há revalidação: se o arquivo
+  // não mudou, o servidor responde 304 e não trafega nada.
   e.respondWith(
-    caches.match(req).then((achado) => {
-      if (achado) return achado;
-      return fetch(req)
-        .then((resposta) => {
-          if (resposta.ok && (externa || url.origin === location.origin)) {
-            const copia = resposta.clone();
-            caches.open(CACHE).then((c) => c.put(req, copia)).catch(() => {});
-          }
-          return resposta;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
+    fetch(req, { cache: 'no-cache' })
+      .then((r) => guardar(req, r))
+      .catch(async () =>
+        (await caches.match(req))
+        // Navegação offline sem a rota em cache ainda abre o app.
+        || (req.mode === 'navigate' ? await caches.match('./index.html') : undefined)
+      )
   );
+});
+
+self.addEventListener('message', (e) => {
+  // O app avisou que a pessoa aceitou a versão nova: assume agora, sem esperar
+  // que todas as abas fechem.
+  if (e.data === 'pular-espera') {
+    self.skipWaiting();
+    return;
+  }
+
+  // Saída manual de "Buscar atualização", para quando algo trava mesmo assim.
+  if (e.data === 'limpar-cache') {
+    e.waitUntil(
+      caches.keys()
+        .then((chaves) => Promise.all(chaves.map((k) => caches.delete(k))))
+        .then(() => e.source?.postMessage('cache-limpo'))
+    );
+  }
 });
