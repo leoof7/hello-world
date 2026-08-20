@@ -911,16 +911,28 @@ function recebimentos(app) {
     .filter((t) => t.amountCents > 0 && t.extraordinary)
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .slice(0, 12);
-  const mediaAvulsos = mediaMensal(app.doc.transactions.filter((t) => t.amountCents > 0 && t.extraordinary), v.mes);
+  const todosAvulsos = app.doc.transactions.filter((t) => t.amountCents > 0 && t.extraordinary);
+  const mediaAvulsos = mediaMensal(todosAvulsos, v.mes);
+  // O avulso lançado hoje não entra na média — ela só usa meses fechados, senão
+  // um mês pela metade puxaria tudo para baixo. Mas ele entrou, e mostrar
+  // "R$ 0 de média" logo abaixo de um recebimento visível parece defeito.
+  // Então o mês corrente aparece separado, com o nome certo.
+  const avulsosDoMes = v.extrasMesCents;
+
+  const rodape = avulsosDoMes > 0
+    ? `${m(v.rendaFixaCents, brlShort)} garantido · ${m(avulsosDoMes, brlShort)} de avulso este mês${
+        mediaAvulsos > 0 ? ` · média de ${m(mediaAvulsos, brlShort)}` : ' · sem média ainda'}`
+    : `${m(v.rendaFixaCents, brlShort)} garantido${
+        mediaAvulsos > 0 ? ` + ${m(mediaAvulsos, brlShort)} de média nos avulsos` : ' · nenhum avulso ainda'}`;
 
   return `
   ${header(app, { voltar: 'tudo' })}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Entra por mês</span></div>
-    <div class="big ser">${m(v.rendaFixaCents + mediaAvulsos, brlShort)}</div>
+    <div class="top"><span class="lbl">Entrou este mês</span></div>
+    <div class="big ser">${m(v.rendaFixaCents + avulsosDoMes, brlShort)}</div>
     <div class="foot">
-      <span class="acc">${m(v.rendaFixaCents, brlShort)} garantido + ${m(mediaAvulsos, brlShort)} de média nos avulsos</span>
+      <span class="acc">${rodape}</span>
     </div>
   </div>
 
@@ -946,6 +958,9 @@ function recebimentos(app) {
 
   <div class="sec">
     <div class="sh"><h3>Avulsos</h3><a data-act="novo-avulso">Lançar</a></div>
+    ${avulsosDoMes > 0 && mediaAvulsos === 0 ? `<p class="empty" style="text-align:left;padding:0 4px 10px;font-size:11.5px">
+      ${m(avulsosDoMes, brlShort)} entrou este mês. A média só aparece depois de um mês
+      fechado — assim ela não é puxada por um mês pela metade.</p>` : ''}
     ${avulsos.length ? `<div class="list">${avulsos.map((t) => `
       <button class="row" data-act="editar" data-id="${esc(t.id)}">
         <div class="ic j">${icon(t.method === 'pix' ? 'pix' : 'dinheiro')}</div>

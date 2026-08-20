@@ -347,6 +347,116 @@ const guia = async (page) => {
   await ctx.close();
 }
 
+// ----------------------------------------------------------- campos numéricos
+//
+// Existe porque "10,500" digitado num campo de dinheiro virava R$ 10,50: a
+// pessoa queria dez mil e quinhentos e o app guardava dez reais e cinquenta,
+// calado. E porque campo com menos de 16px faz o Safari do iPhone dar zoom e
+// jogar a tela para o lado.
+
+{
+  console.log('\ncampos de número e dinheiro');
+  const { ctx, page } = await novoAparelho('vazio');
+
+  const digitar = async (sel, texto) => {
+    await page.click(sel);
+    await page.evaluate((x) => { document.querySelector(x).value = ''; }, sel);
+    await page.type(sel, texto, { delay: 12 });
+    return page.inputValue(sel);
+  };
+
+  await page.evaluate(() => { location.hash = '#dividas'; });
+  await page.waitForTimeout(350);
+  await page.click('[data-act="nova-divida"]');
+  await page.waitForSelector('.sheet #frm');
+
+  ok('campo tem 16px — abaixo disso o iPhone dá zoom ao focar',
+    (await page.evaluate(() => getComputedStyle(document.querySelector('.sheet input')).fontSize)) === '16px');
+
+  ok('dinheiro cresce da direita: "10500" vira 105,00',
+    (await digitar('.sheet [name="saldo"]', '10500')) === '105,00');
+  ok('e "1050000" vira 10.500,00',
+    (await digitar('.sheet [name="saldo"]', '1050000')) === '10.500,00');
+  ok('porcentagem recusa R$ e letras',
+    (await digitar('.sheet [name="taxa"]', 'R$16,5abc')) === '16,5');
+
+  await page.fill('.sheet [name="name"]', 'Itau');
+  await digitar('.sheet [name="saldo"]', '1050000');
+  await digitar('.sheet [name="taxa"]', '16');
+  await digitar('.sheet [name="minimoPct"]', '15');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(700);
+  const salvo = await page.evaluate(async () => {
+    const { app } = await import('./src/ui/app.js');
+    return app.doc.debts[0];
+  });
+  ok('e o que foi salvo é o que apareceu no campo',
+    salvo.balanceCents === 1050000 && salvo.monthlyRate === 0.16 && salvo.minPaymentRate === 0.15,
+    `R$ ${(salvo.balanceCents / 100).toFixed(2)}`);
+
+  // dia e parcelas fora da faixa ficam presos nela
+  await page.evaluate(() => { location.hash = '#cartoes'; });
+  await page.waitForTimeout(350);
+  await page.click('[data-act="novo-cartao"]');
+  await page.waitForSelector('.sheet #frm');
+  await page.fill('.sheet [name="name"]', 'Teste');
+  await page.fill('.sheet [name="closingDay"]', '99');
+  await page.fill('.sheet [name="dueDay"]', '0');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(700);
+  const cartao = await page.evaluate(async () => (await import('./src/ui/app.js')).app.doc.cards[0]);
+  ok('dia de fechamento fora do mês é preso na faixa',
+    cartao.closingDay === 31 && cartao.dueDay === 1, `fecha ${cartao.closingDay}, vence ${cartao.dueDay}`);
+
+  await page.evaluate(() => { location.hash = '#painel'; });
+  await page.waitForTimeout(350);
+  await page.click('[data-act="novo"]');
+  await page.waitForSelector('.sheet #frm');
+  await page.fill('.sheet [name="description"]', 'Sofá');
+  await digitar('.sheet [name="valor"]', '120000');
+  await page.fill('.sheet [name="count"]', '900');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(900);
+  const parcelas = await page.evaluate(async () => {
+    const { app } = await import('./src/ui/app.js');
+    return app.doc.transactions.filter((t) => t.installment).length;
+  });
+  ok('900 parcelas viram 48, não 900 lançamentos', parcelas === 48, `${parcelas} parcelas`);
+
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
+// ------------------------------------------- avulso do mês aparece no total
+//
+// Existe porque um avulso lançado hoje some do total: a média só usa meses
+// fechados, e a tela dizia "R$ 0 de média" logo abaixo do recebimento visível.
+
+{
+  console.log('\nrecebimento avulso do mês');
+  const { ctx, page } = await novoAparelho('vazio');
+  await page.evaluate(async () => {
+    const { commit } = await import('./src/ui/app.js');
+    const { today } = await import('./src/core/dates.js');
+    const hoje = today();
+    await commit((d) => {
+      d.recurring.push({ id: 'r1', label: 'Totvs', kind: 'income', amountCents: 470000, dayOfMonth: 7, fixed: true });
+      d.transactions.push({ id: 't1', date: hoje, competence: hoje.slice(0, 7),
+        description: 'Cr7', amountCents: 2000, extraordinary: true, method: 'pix' });
+    });
+  });
+  await page.evaluate(() => { location.hash = '#recebimentos'; });
+  await page.waitForTimeout(600);
+
+  const tela = await page.evaluate(() => document.body.innerText);
+  ok('o total soma o avulso do mês', tela.includes('R$ 4.720'), (tela.match(/R\$ [\d.]+/) || [])[0]);
+  ok('e diz que a média ainda não existe', tela.includes('sem média ainda'));
+  ok('explicando por quê', tela.includes('A média só aparece depois de um mês'));
+
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
 // --------------------------------------------------- números que não existem
 //
 // Existe porque uma dívida de R$ 3.732 apareceu na tela pedindo R$ 136.232 de

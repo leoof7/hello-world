@@ -361,7 +361,15 @@ body {
 .field label { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .field input, .field select, .field textarea {
   background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 13px 14px;
-  font-family: inherit; font-size: 15px; color: var(--ink); width: 100%;
+  font-family: inherit; color: var(--ink); width: 100%;
+  /* 16px não é escolha de estética: abaixo disso o Safari do iPhone dá zoom
+     automático ao focar o campo, e a tela inteira sai do lugar. */
+  font-size: 16px;
+}
+/* Valor em dinheiro se lê melhor com dígitos de largura fixa. */
+.field input[data-money], .field input[data-percent] {
+  font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-variant-numeric: tabular-nums;
 }
 .field input:focus, .field select:focus { outline: 2px solid var(--jade); outline-offset: 1px; }
 .words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0; }

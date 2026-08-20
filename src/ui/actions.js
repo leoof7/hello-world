@@ -43,6 +43,40 @@ async function executar(acao, dados) {
 // ----------------------------------------------------------- formulário genérico
 
 /**
+ * Máscaras que impedem o campo de aceitar algo diferente do que a pessoa quis.
+ *
+ * Dinheiro: o valor cresce da direita, como em qualquer app de banco. Digitar
+ * "10500" dá R$ 105,00 e "1050000" dá R$ 10.500,00 — sempre, sem depender de
+ * onde a pessoa pôs o ponto ou a vírgula.
+ *
+ * Isso não é enfeite. Antes, texto livre, "10,500" era lido como R$ 10,50: a
+ * pessoa queria dez mil e quinhentos e o app guardava dez reais e cinquenta.
+ * Erro de mil vezes, calado, num app cuja função é dizer quanto você deve.
+ *
+ * Porcentagem: só dígitos e uma vírgula. Sem R$, sem ponto de milhar.
+ */
+function aplicarMascaras(card) {
+  for (const el of card.querySelectorAll('[data-money]')) {
+    const formatar = () => {
+      const digitos = el.value.replace(/\D/g, '').slice(0, 12);
+      el.value = formatCents(Number(digitos || 0));
+      // o cursor precisa ficar no fim: o valor cresce da direita
+      requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length));
+    };
+    el.addEventListener('input', formatar);
+    // Ao focar num campo zerado, esvazia: ninguém quer apagar "0,00" antes de digitar.
+    el.addEventListener('focus', () => { if (Number(el.value.replace(/\D/g, '')) === 0) el.value = ''; });
+    el.addEventListener('blur', () => { if (!el.value.trim()) el.value = formatCents(0); });
+  }
+
+  for (const el of card.querySelectorAll('[data-percent]')) {
+    el.addEventListener('input', () => {
+      el.value = el.value.replace(/[^\d,.]/g, '').replace(/\./g, ',').replace(/,(?=.*,)/g, '');
+    });
+  }
+}
+
+/**
  * Abre uma folha com campos e devolve os valores, ou null se cancelar.
  * Campo de dinheiro entra e sai em centavos — nunca em ponto flutuante.
  */
@@ -66,7 +100,8 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
         ${c.hint ? `<span style="font-size:11px;color:var(--muted)">${esc(c.hint)}</span>` : ''}</div>`;
     }
     const valor = c.type === 'money' ? formatCents(Math.abs(c.value || 0)) : (c.value ?? '');
-    const modo = c.type === 'money' ? 'decimal' : c.type === 'number' ? 'numeric' : 'text';
+    const modo = c.type === 'money' || c.type === 'percent' ? 'decimal'
+      : c.type === 'number' ? 'numeric' : 'text';
     const tipo = c.type === 'date' ? 'date' : 'text';
     // Campo de confirmação: o teclado do iPhone não pode "ajudar". Autocapitular
     // e autocorrigir uma palavra-senha é o caminho curto para a pessoa digitar
@@ -74,9 +109,14 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
     const teclado = c.type === 'senha-confirma'
       ? 'autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"'
       : c.type === 'text' ? 'autocapitalize="sentences"' : '';
+    // Campo de número anuncia sua faixa: o teclado do iPhone não impede nada,
+    // mas o valor é preso na faixa na leitura, logo abaixo.
+    const faixa = c.type === 'number' && (c.min !== undefined || c.max !== undefined)
+      ? `min="${c.min ?? ''}" max="${c.max ?? ''}"` : '';
     return `<div class="field"><label for="${id}">${esc(c.label)}</label>
       <input type="${tipo}" inputmode="${modo}" id="${id}" name="${c.name}" value="${esc(valor)}"
-        placeholder="${esc(c.placeholder || '')}" ${teclado}>
+        placeholder="${esc(c.placeholder || '')}" ${teclado} ${faixa}
+        ${c.type === 'money' ? 'data-money="1"' : ''} ${c.type === 'percent' ? 'data-percent="1"' : ''}>
       ${c.hint ? `<span style="font-size:11px;color:var(--muted)">${esc(c.hint)}</span>` : ''}</div>`;
   }).join('');
 
@@ -89,6 +129,7 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
      </form>`,
     {
       onMount: (card, fechar) => {
+        aplicarMascaras(card);
         card.querySelector('[data-x]').onclick = () => fechar(null);
         card.querySelector('[data-del]')?.addEventListener('click', () => fechar({ __apagar: true }));
         card.querySelector('#frm').onsubmit = (ev) => {
@@ -97,7 +138,10 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
           for (const c of campos) {
             const el = card.querySelector(`[name="${c.name}"]`);
             if (c.type === 'money') out[c.name] = toCents(el.value);
-            else if (c.type === 'number') out[c.name] = Number(el.value) || 0;
+            else if (c.type === 'number') {
+              const n = Math.trunc(Number(el.value)) || 0;
+              out[c.name] = Math.min(c.max ?? Infinity, Math.max(c.min ?? -Infinity, n));
+            }
             else if (c.type === 'checkbox') out[c.name] = el.checked;
             else out[c.name] = el.value.trim();
           }
@@ -254,7 +298,7 @@ const ACOES = {
     const r = await form(
       'Trocar por empréstimo mais barato',
       `${cara.name} está a ${(cara.monthlyRate * 100).toFixed(1)}% ao mês. Consignado costuma ficar entre 1,5% e 2,2%.`,
-      [{ name: 'taxa', label: 'Taxa do novo empréstimo (% ao mês)', type: 'text', value: '1,8', hint: 'a que o banco te ofereceu de fato' }],
+      [{ name: 'taxa', label: 'Taxa do novo empréstimo (% ao mês)', type: 'percent', value: '1,8', hint: 'a que o banco te ofereceu de fato' }],
       { ok: 'Ver a diferença' }
     );
     if (!r) return;
@@ -389,7 +433,8 @@ const ACOES = {
       { name: 'incomeCents', label: 'Renda mensal', type: 'money', value: p.incomeCents },
       { name: 'minimumCostCents', label: 'Custo de vida mínimo', type: 'money', value: p.minimumCostCents,
         hint: 'só o que não dá para cortar. A Análise calcula sozinha com 3 meses de histórico' },
-      { name: 'emergencyTargetMonths', label: 'Meses de reserva desejados', type: 'number', value: p.emergencyTargetMonths || 6 },
+      { name: 'emergencyTargetMonths', label: 'Meses de reserva desejados', type: 'number', value: p.emergencyTargetMonths || 6,
+        min: 1, max: 24, hint: 'entre 1 e 24. Três a seis é o mais comum' },
     ]);
     if (!r) return;
     await commit((d) => { Object.assign(d.profile, r); });
@@ -687,7 +732,8 @@ async function editarLancamento(id, sugestao = {}) {
       { name: 'date', label: 'Quando', type: 'date', value: tx?.date ?? sugestao.date ?? app.todayISO },
       { name: 'origem', label: 'Onde', type: 'select', value: origemAtual, options: opcoesOrigem() },
       { name: 'categoryId', label: 'Categoria', type: 'select', value: tx?.categoryId ?? sugestao.categoryId ?? '', options: opcoesCategoria() },
-      { name: 'count', label: 'Parcelas', type: 'number', value: sugestao.count || 1, hint: '1 para à vista. Vale só para cartão de crédito.' },
+      { name: 'count', label: 'Parcelas', type: 'number', value: sugestao.count || 1, min: 1, max: 48,
+        hint: '1 para à vista. Vale só para cartão de crédito, até 48x.' },
       { name: 'extraordinary', label: 'Entrada avulsa (trader, serviço por fora)', type: 'checkbox', value: tx?.extraordinary ?? sugestao.extraordinary ?? false },
     ],
     { ok: tx ? 'Salvar' : 'Lançar', apagar: tx ? 'Apagar lançamento' : null }
@@ -792,8 +838,8 @@ async function editarCartao(id) {
     'O dia do fechamento é o que decide em qual fatura cada compra cai. Compra feita NO dia do fechamento já entra na fatura seguinte.',
     [
       { name: 'name', label: 'Nome', type: 'text', value: c?.name || '', placeholder: 'Nubank' },
-      { name: 'closingDay', label: 'Fecha dia', type: 'number', value: c?.closingDay || 20 },
-      { name: 'dueDay', label: 'Vence dia', type: 'number', value: c?.dueDay || 27 },
+      { name: 'closingDay', label: 'Fecha dia', type: 'number', value: c?.closingDay || 20, min: 1, max: 31 },
+      { name: 'dueDay', label: 'Vence dia', type: 'number', value: c?.dueDay || 27, min: 1, max: 31 },
       { name: 'limite', label: 'Limite', type: 'money', value: c?.limitCents || 0 },
       { name: 'color', label: 'Cor', type: 'select', value: c?.color || 'blue',
         options: [
@@ -890,9 +936,9 @@ async function editarDivida(id) {
             { value: KIND.INSTALLMENT, label: 'Parcelamento já contratado' },
           ] },
         { name: 'saldo', label: 'Quanto deve hoje', type: 'money', value: atual.saldo },
-        { name: 'taxa', label: 'Juros ao mês (%)', type: 'text', value: atual.taxa,
+        { name: 'taxa', label: 'Juros ao mês (%)', type: 'percent', value: atual.taxa,
           hint: 'só o número. Rotativo costuma ficar entre 12 e 16; cheque especial no teto de 8' },
-        { name: 'minimoPct', label: 'Mínimo: quantos POR CENTO do saldo', type: 'text', value: atual.minimoPct,
+        { name: 'minimoPct', label: 'Mínimo: quantos POR CENTO do saldo', type: 'percent', value: atual.minimoPct,
           hint: 'só o número, sem R$. Cartão costuma exigir 15. Se o seu mínimo é um valor fixo em reais, deixe vazio e use o campo abaixo' },
         { name: 'minimoFixo', label: 'Ou mínimo fixo por mês, em reais', type: 'money', value: atual.minimoFixo },
       ], { ok: 'Salvar', apagar: d0 ? 'Quitei esta dívida' : null });
@@ -971,7 +1017,8 @@ async function editarRecorrente(id, kind) {
     [
       { name: 'label', label: 'Nome', type: 'text', value: r0?.label || '', placeholder: entrada ? 'Salário' : 'Aluguel' },
       { name: 'valor', label: 'Valor', type: 'money', value: Math.abs(r0?.amountCents || 0) },
-      { name: 'dia', label: 'Todo dia', type: 'number', value: r0?.dayOfMonth || 5 },
+      { name: 'dia', label: 'Todo dia', type: 'number', value: r0?.dayOfMonth || 5, min: 1, max: 28,
+        hint: 'até 28, para o dia existir em todos os meses' },
       ...(entrada ? [] : [{ name: 'categoryId', label: 'Categoria', type: 'select', value: r0?.categoryId || '', options: opcoesCategoria() }]),
     ], { ok: 'Salvar', apagar: r0 ? 'Apagar' : null });
   if (!r) return;
