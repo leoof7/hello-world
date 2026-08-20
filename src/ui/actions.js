@@ -476,22 +476,48 @@ const ACOES = {
       if (t.amountCents >= 0) continue;
       const comp = t.competence || monthKey(t.date);
       if (comp !== month) continue;
-      const nome = catById[t.categoryId]?.name || 'Sem categoria';
-      porCategoria.set(nome, (porCategoria.get(nome) || 0) + Math.abs(t.amountCents));
+      const chave = t.categoryId || '__sem';
+      if (!porCategoria.has(chave)) porCategoria.set(chave, { nome: catById[t.categoryId]?.name || 'Sem categoria', total: 0, itens: [] });
+      const grupo = porCategoria.get(chave);
+      grupo.total += Math.abs(t.amountCents);
+      grupo.itens.push(t);
     }
-    const linhas = [...porCategoria.entries()].sort((a, b) => b[1] - a[1]);
-    const total = sum(linhas.map((l) => l[1]));
+    const grupos = [...porCategoria.values()].sort((a, b) => b.total - a.total);
+    const total = sum(grupos.map((g) => g.total));
 
     await sheet(
       `<h4>${esc(formatMonthKey(month, { long: true }))}</h4>
-       <p class="sub">${esc(brl(total))} gastos no mês, por categoria.</p>
-       ${linhas.length ? `<div class="list">${linhas.map(([nome, cents]) => `
-         <div class="row">
-           <div class="bd"><div class="t">${esc(nome)}</div></div>
-           <div class="rt"><div class="amt num">${esc(brl(cents))}</div></div>
+       <p class="sub">${esc(brl(total))} gastos no mês. Toque numa categoria pra ver os lançamentos.</p>
+       ${grupos.length ? `<div class="list">${grupos.map((g, i) => `
+         <button type="button" class="row" data-toggle="${i}">
+           <div class="bd"><div class="t">${esc(g.nome)}</div><div class="s">${g.itens.length} ${g.itens.length === 1 ? 'lançamento' : 'lançamentos'}</div></div>
+           <div class="rt"><div class="amt num">${esc(brl(g.total))}</div></div>
+           <span class="arr" data-seta="${i}">${icon('baixo')}</span>
+         </button>
+         <div class="expand-body" data-body="${i}" hidden>${g.itens
+           .sort((a, b) => (a.date < b.date ? 1 : -1))
+           .map((t) => `
+             <div class="row">
+               <div class="bd"><div class="t">${esc(t.description)}</div><div class="s">${formatShort(t.date)}</div></div>
+               <div class="rt"><div class="amt num">${esc(brl(Math.abs(t.amountCents)))}</div></div>
+             </div>`).join('')}
          </div>`).join('')}</div>` : '<div class="empty">Nenhum gasto categorizado nesse mês.</div>'}
        <div class="btns"><button class="btn ghost" data-x="1" style="width:100%">Fechar</button></div>`,
-      { onMount: (card, fechar) => { card.querySelector('[data-x]').onclick = () => fechar(null); } }
+      {
+        onMount: (card, fechar) => {
+          card.querySelector('[data-x]').onclick = () => fechar(null);
+          card.querySelectorAll('[data-toggle]').forEach((botao) => {
+            botao.onclick = () => {
+              const i = botao.dataset.toggle;
+              const corpo = card.querySelector(`[data-body="${i}"]`);
+              const seta = card.querySelector(`[data-seta="${i}"]`);
+              const abrindo = corpo.hasAttribute('hidden');
+              corpo.toggleAttribute('hidden');
+              seta.innerHTML = icon(abrindo ? 'cima' : 'baixo');
+            };
+          });
+        },
+      }
     );
   },
 
@@ -1470,21 +1496,26 @@ async function editarRecorrente(id, kind) {
  * próprio botão vira "Parar" enquanto ouve — tocar de novo encerra na hora —
  * e um tempo limite força o reset mesmo se nada disso disparar.
  */
+/**
+ * Botão de segurar-e-falar, como um walkie-talkie: pressiona, fala, solta —
+ * e solta já registra sozinho. Só não registra quando a parada não foi um
+ * "terminei de falar" de verdade (deu erro, ou estourou o tempo limite).
+ */
 function pedirFrase() {
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   return sheet(
     `<h4>Lançar por frase</h4>
-     <p class="sub">Escreva (ou dite pelo teclado) como você falaria:
-       "gastei 85 no mercado ontem", "45,90 no posto no crédito em 3x", "recebi 300 do trader".</p>
+     <p class="sub">Segure o botão e fale como você falaria: "gastei 85 no mercado ontem",
+       "45,90 no posto no crédito em 3x", "recebi 300 do trader". Solte quando terminar.</p>
      <div class="field">
        <label for="fr-nl">O que aconteceu</label>
        <textarea id="fr-nl" rows="2" placeholder="gastei 85 no mercado ontem"></textarea>
-       <span style="font-size:11px;color:var(--muted)">${Reconhecimento
-        ? 'Ou toque no microfone abaixo para ditar.'
-        : 'Para ditar no iPhone: toque no microfone do próprio teclado. Este navegador não dá ao app acesso ao reconhecimento de voz.'}</span>
      </div>
-     ${Reconhecimento ? `<div class="btns"><button class="btn ghost" data-mic="1" style="width:100%">${icon('microfone')} Ditar</button></div>` : ''}
+     ${Reconhecimento ? `
+       <button type="button" class="mic3d" data-mic="1" aria-label="Segure para falar">${icon('microfone')}</button>
+       <p class="mic-legenda" data-legenda>Segure para falar, solte para registrar</p>`
+      : `<p class="sub">Para ditar no iPhone: toque no microfone do próprio teclado. Este navegador não dá ao app acesso ao reconhecimento de voz.</p>`}
      <div class="btns"><button class="btn primary" data-ok="1">Registrar</button>
        <button class="btn ghost" data-x="1">Cancelar</button></div>`,
     {
@@ -1494,51 +1525,62 @@ function pedirFrase() {
         card.querySelector('[data-ok]').onclick = () => fechar(campo.value.trim() || null);
 
         const botaoMic = card.querySelector('[data-mic]');
-        botaoMic?.addEventListener('click', (ev) => {
-          const botao = ev.target.closest('button');
+        const legenda = card.querySelector('[data-legenda]');
+        if (!botaoMic) return;
 
-          // Já está ouvindo: o toque agora é "parar", não começar de novo.
-          if (botao.dataset.ouvindo) {
-            try { botao._rec?.stop(); } catch { /* já parado */ }
-            return;
-          }
+        let rec = null;
+        let ativo = false;
 
-          const rec = new Reconhecimento();
-          botao._rec = rec;
+        const iniciar = (ev) => {
+          ev.preventDefault();
+          if (ativo) return;
+          ativo = true;
+
+          rec = new Reconhecimento();
           rec.lang = 'pt-BR';
           rec.interimResults = true;
 
           let resolvido = false;
+          let motivoParada = null; // null = soltou de propósito; 'timeout' | 'erro' não registram sozinhos
           const encerrar = () => {
             if (resolvido) return;
             resolvido = true;
+            ativo = false;
             clearTimeout(tempoLimite);
-            delete botao.dataset.ouvindo;
-            botao._rec = null;
-            botao.innerHTML = `${icon('microfone')} Ditar`;
+            botaoMic.classList.remove('rec');
+            legenda.textContent = 'Segure para falar, solte para registrar';
+            if (motivoParada === null && campo.value.trim()) fechar(campo.value.trim());
           };
           const tempoLimite = setTimeout(() => {
+            motivoParada = 'timeout';
             try { rec.stop(); } catch { /* já parado */ }
             encerrar();
             toast('Não consegui ouvir a tempo. Digite a frase.');
-          }, 12000);
+          }, 15000);
 
-          // Interim ou final, mostra o que já reconheceu — assim dá para ver
-          // que o microfone está de fato captando, em vez de confiar cego
-          // num rótulo "ouvindo…" que pode estar travado por trás.
           rec.onresult = (e) => { campo.value = e.results[0][0].transcript; };
-          rec.onerror = () => toast('Não consegui ouvir. Digite a frase.');
+          rec.onerror = () => { motivoParada = 'erro'; toast('Não consegui ouvir. Digite a frase.'); };
           rec.onend = encerrar;
 
           try {
             rec.start();
-            botao.dataset.ouvindo = '1';
-            botao.innerHTML = `${icon('microfone')} Toque para parar`;
+            botaoMic.classList.add('rec');
+            legenda.textContent = 'Ouvindo… solte quando terminar';
           } catch {
-            encerrar();
+            ativo = false;
             toast('O microfone não está disponível aqui.');
           }
-        });
+        };
+
+        const soltar = () => {
+          if (!ativo || !rec) return;
+          try { rec.stop(); } catch { /* já parado */ }
+        };
+
+        botaoMic.addEventListener('pointerdown', iniciar);
+        botaoMic.addEventListener('pointerup', soltar);
+        botaoMic.addEventListener('pointerleave', soltar);
+        botaoMic.addEventListener('pointercancel', soltar);
       },
     }
   );
