@@ -9,7 +9,7 @@ import { today, monthKey, addMonthKey, addDays } from '../core/dates.js';
 import { cycleFor, openCycle, nextCycle, dueDateOf } from '../core/statements.js';
 import { byPurchase, wall, committed } from '../core/installments.js';
 import { buildEvents, daily, monthly, freeToSpend, nextIncomeDate } from '../core/projection.js';
-import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, minimumOnlyPlan, minimumsToday, order } from '../core/debts.js';
+import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, minimumOnlyPlan, minimumsToday, minimumOf, order } from '../core/debts.js';
 import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js';
 import { scan } from '../core/leaks.js';
 import { diagnose } from '../core/health.js';
@@ -94,6 +94,10 @@ export function derive(doc, todayISO = today()) {
   const comTeto = categorias.map((c) => ({ ...c, limitCents: doc.budgets?.[c.id] || 0 }));
   const orcamento = monthStatus(comTeto, doc.transactions, todayISO);
   const orcamentoGeral = orcamento.length ? overall(orcamento, todayISO) : null;
+  // Teto numa categoria fixa nunca sai de zero: o gasto fixo é recorrente e não
+  // passa por lançamento categorizado. A tela avisa em vez de deixar a barra
+  // parada para sempre sem explicação.
+  const tetoEmFixa = orcamento.filter((c) => c.fixed && c.limitCents > 0);
   const fixoVariavel = fixedVsVariable(doc.transactions, categorias, mes);
 
   // ---- vazamentos e diagnóstico ----
@@ -165,6 +169,7 @@ export function derive(doc, todayISO = today()) {
     planoMinimo,
     orcamento,
     orcamentoGeral,
+    tetoEmFixa,
     piorCategoria: orcamento.length ? worst(orcamento) : null,
     fixoVariavel,
     vazamentos,
@@ -271,14 +276,18 @@ function cardView(card, doc, faturas, todayISO) {
   };
 }
 
-/** Os mínimos das dívidas viram saídas mensais na projeção de caixa. */
+/**
+ * Os mínimos das dívidas viram saídas mensais na projeção de caixa.
+ *
+ * Usa `minimumOf` do núcleo, e não uma conta própria. Esta função era a quarta
+ * cópia da mesma regra: quando as outras três foram unificadas, ela ficou para
+ * trás e continuou aceitando mínimo maior que o saldo. O resultado foi a
+ * projeção despencar para R$ 650 mil negativos com uma dívida de R$ 10 mil.
+ */
 function minimosAgendados(debts, todayISO) {
   const out = [];
   for (const d of debts) {
-    const minimo = Math.max(
-      Math.abs(d.minPaymentCents || 0),
-      Math.round(Math.abs(d.balanceCents) * (d.minPaymentRate || 0))
-    );
+    const minimo = minimumOf(d);
     if (minimo <= 0) continue;
     const dia = Number((d.since || todayISO).slice(8, 10)) || 10;
     for (let i = 0; i < 4; i++) {

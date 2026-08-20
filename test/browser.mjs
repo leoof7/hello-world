@@ -347,6 +347,55 @@ const guia = async (page) => {
   await ctx.close();
 }
 
+// ------------------------------------------- as telas concordam entre si
+//
+// Existe porque `minimosAgendados` era a quarta cópia da regra do mínimo e
+// ficou para trás: a tela de Dívidas dizia um número e a projeção usava outro,
+// levando o caixa a R$ 650 mil negativos com uma dívida de R$ 10 mil.
+
+{
+  console.log('\ncoerência entre as telas');
+  const { ctx, page } = await novoAparelho('vazio');
+
+  await page.evaluate(async () => {
+    const { commit } = await import('./src/ui/app.js');
+    await commit((d) => {
+      d.accounts.push({ id: 'ac', name: 'Conta', type: 'checking', balanceCents: 0 });
+      d.recurring.push({ id: 'r1', label: 'Totvs', kind: 'income', amountCents: 470000, dayOfMonth: 7, fixed: true });
+      d.recurring.push({ id: 'r2', label: 'Aluguel', kind: 'expense', amountCents: 90000, dayOfMonth: 10, categoryId: 'moradia' });
+      d.debts.push({ id: 'dv', name: 'Itau', kind: 'revolving', balanceCents: 1050000,
+        monthlyRate: 0.16, minPaymentRate: 36.5, since: '2026-08-10' });
+      d.budgets = { moradia: 90000, mercado: 80000 };
+    });
+  });
+
+  const numeros = await page.evaluate(async () => {
+    const { app } = await import('./src/ui/app.js');
+    const v = app.view;
+    return {
+      minimos: v.minimosCents,
+      agendado: Math.abs(v.eventos.find((e) => e.kind === 'debt')?.amountCents || 0),
+      saldo: Math.abs(app.doc.debts[0].balanceCents),
+      pior: v.projecao.min.cents,
+      renda: v.rendaFixaCents,
+    };
+  });
+  ok('o mínimo agendado na projeção é o mesmo da tela de Dívidas',
+    numeros.agendado === numeros.minimos, `${numeros.agendado} vs ${numeros.minimos}`);
+  ok('e nunca passa do saldo devedor', numeros.agendado <= numeros.saldo);
+  ok('a projeção fica em ordem de grandeza plausível', numeros.pior > -5000000,
+    `pior dia R$ ${(numeros.pior / 100).toFixed(2)}`);
+  ok('a renda cadastrada chega às contas', numeros.renda === 470000);
+
+  await page.evaluate(() => { location.hash = '#analise'; });
+  await page.waitForTimeout(600);
+  ok('e a Análise avisa que teto em categoria fixa não funciona',
+    await page.evaluate(() => document.body.innerText.includes('gasto fixo')));
+
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
 // ----------------------------------------------------------- campos numéricos
 //
 // Existe porque "10,500" digitado num campo de dinheiro virava R$ 10,50: a

@@ -94,6 +94,10 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
         <input type="checkbox" id="${id}" name="${c.name}" ${c.value ? 'checked' : ''} style="width:22px;height:22px">
         <label for="${id}" style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink-2)">${esc(c.label)}</label></div>`;
     }
+    if (c.type === 'nota') {
+      return `<p style="font-size:12px;color:var(--muted);line-height:1.6;margin:18px 0 12px;
+        padding-top:14px;border-top:1px solid var(--line-2)">${esc(c.label)}</p>`;
+    }
     if (c.type === 'textarea') {
       return `<div class="field"><label for="${id}">${esc(c.label)}</label>
         <textarea id="${id}" name="${c.name}" rows="${c.rows || 3}" placeholder="${esc(c.placeholder || '')}">${esc(c.value ?? '')}</textarea>
@@ -136,6 +140,7 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null } = {}) {
           ev.preventDefault();
           const out = {};
           for (const c of campos) {
+            if (c.type === 'nota') continue;
             const el = card.querySelector(`[name="${c.name}"]`);
             if (c.type === 'money') out[c.name] = toCents(el.value);
             else if (c.type === 'number') {
@@ -376,12 +381,25 @@ const ACOES = {
   },
 
   async tetos() {
-    const campos = app.doc.categories
-      .filter((c) => c.id !== 'renda')
-      .map((c) => ({ name: c.id, label: c.name, type: 'money', value: app.doc.budgets?.[c.id] || 0 }));
+    const uteis = app.doc.categories.filter((c) => c.id !== 'renda');
+    const campo = (c) => ({ name: c.id, label: c.name, type: 'money', value: app.doc.budgets?.[c.id] || 0 });
+
+    // Teto é para o que VARIA. Aluguel não varia: ele tem valor e data, e o
+    // lugar dele é em Gastos fixos. Misturar os dois numa lista só fez alguém
+    // cadastrar moradia aqui, ver "R$ 0 de R$ 900" para sempre, e ter de
+    // cadastrar de novo no outro lugar.
+    const variaveis = uteis.filter((c) => !c.fixed);
+    const fixas = uteis.filter((c) => c.fixed);
+
+    const campos = [
+      ...variaveis.map(campo),
+      { name: '__nota', type: 'nota',
+        label: 'As de baixo são gastos fixos: têm valor e dia certos. O lugar delas é Tudo → Gastos fixos, que é o que entra na projeção. Teto aqui só faz sentido se você quiser vigiar um extra dentro da categoria.' },
+      ...fixas.map(campo),
+    ];
 
     const r = await form('Tetos por categoria',
-      'Zero significa sem teto. Comece só pelas três que mais escapam — teto em tudo vira teto em nada.',
+      'Teto é para o gasto que varia — mercado, delivery, lazer. Zero significa sem teto, e teto em tudo vira teto em nada: comece pelas três que mais escapam.',
       campos);
     if (!r) return;
 

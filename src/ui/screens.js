@@ -655,6 +655,14 @@ function analise(app) {
         <span style="font-size:10.5px;color:var(--muted)">${m(v.orcamentoGeral.safePerDayCents)}/dia até fechar</span></div>
     </div>` : ''}
     ${v.orcamento.map(categoria).join('')}
+    ${v.tetoEmFixa.length ? `<div class="nudge" style="margin-top:10px">
+      <span class="ic">${icon('ajuda')}</span>
+      <div><b>${esc(v.tetoEmFixa.map((c) => c.name).join(', '))} ${v.tetoEmFixa.length === 1 ? 'é gasto fixo' : 'são gastos fixos'}</b>
+      <i>teto serve para o que varia. Aluguel e contas têm valor e dia certos — cadastre em
+         Tudo → Gastos fixos, que é de lá que a projeção tira o dinheiro. Aqui ${v.tetoEmFixa.length === 1 ? 'ele fica' : 'eles ficam'}
+         sempre em R$ 0 gasto, porque o lançamento não passa por categoria.</i></div>
+      <span class="arr">${icon('seta')}</span>
+    </div>` : ''}
   </div>` : `
   <div class="sec">
     <div class="sh"><h3>Tetos do mês</h3></div>

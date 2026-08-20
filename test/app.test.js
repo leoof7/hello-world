@@ -299,3 +299,50 @@ test('reconhece o que é e o que não é documento do Zero', async () => {
   assert.ok(!looksLikeDocument({ transactions: 'nope' }));
   assert.ok(!looksLikeDocument(null));
 });
+
+// ------------------------------------- a projeção usa a mesma regra de mínimo
+//
+// Existe porque `minimosAgendados` era a QUARTA cópia da regra do mínimo, e
+// ficou para trás quando as outras três foram unificadas. Com uma dívida de
+// R$ 10.500 mal cadastrada, a projeção despencou para R$ 650 mil negativos.
+
+test('a projeção nunca agenda mais que o mínimo real da dívida', () => {
+  const doc = emptyDocument();
+  doc.accounts = [{ id: 'ac', name: 'Conta', type: 'checking', balanceCents: 0 }];
+  doc.recurring = [{ id: 'r', label: 'Salário', kind: 'income', dayOfMonth: 7, amountCents: 470000 }];
+  // como o app aceitava antes: 3650% do saldo
+  doc.debts = [{ id: 'dv', name: 'Itau', kind: 'revolving', balanceCents: 1050000,
+                 monthlyRate: 0.16, minPaymentRate: 36.5, since: '2026-08-10' }];
+
+  const v = derive(doc, HOJE);
+  const agendado = v.eventos.filter((e) => e.kind === 'debt');
+
+  assert.ok(agendado.length > 0, 'os mínimos entram na projeção');
+  for (const e of agendado) {
+    assert.ok(Math.abs(e.amountCents) <= 1050000,
+      `mínimo agendado de ${Math.abs(e.amountCents)} passa do saldo devedor`);
+  }
+  assert.equal(Math.abs(agendado[0].amountCents), v.minimosCents,
+    'a projeção agenda exatamente o que a tela de Dívidas mostra');
+});
+
+test('projeção de quem só tem salário não fica em milhões negativos', () => {
+  const doc = emptyDocument();
+  doc.accounts = [{ id: 'ac', name: 'Conta', type: 'checking', balanceCents: 0 }];
+  doc.recurring = [{ id: 'r', label: 'Salário', kind: 'income', dayOfMonth: 7, amountCents: 470000 }];
+  doc.debts = [{ id: 'dv', name: 'Itau', kind: 'revolving', balanceCents: 1050000,
+                 monthlyRate: 0.16, minPaymentRate: 0.15, since: '2026-08-10' }];
+
+  const v = derive(doc, HOJE);
+  const menor = v.projecao.min.cents;
+  // três meses de mínimos (~R$ 1.575 cada) contra três salários: nada perto de milhões
+  assert.ok(menor > -1000000, `o pior dia da projeção deu ${(menor / 100).toFixed(2)}`);
+});
+
+test('teto em categoria fixa é sinalizado para a tela avisar', () => {
+  const doc = seedDocument(HOJE);
+  doc.budgets = { ...doc.budgets, moradia: 90000 };  // moradia é fixed:true
+  const v = derive(doc, HOJE);
+  assert.ok(v.tetoEmFixa.some((c) => c.id === 'moradia'));
+  assert.ok(!v.tetoEmFixa.some((c) => c.id === 'mercado'), 'mercado varia, não entra no aviso');
+});
