@@ -13,6 +13,7 @@ import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, min
 import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js';
 import { scan } from '../core/leaks.js';
 import { diagnose } from '../core/health.js';
+import { monthlySpend, dailyNet, worstDay } from '../core/history.js';
 import { categorizeAll } from '../core/categorize.js';
 import { MERCHANTS } from '../seed/categories.js';
 import { PADROES } from '../config.js';
@@ -120,6 +121,11 @@ export function derive(doc, todayISO = today()) {
     .map((c) => ({ ...c, fixedCents: gastoFixoPorCategoria.get(c.id) }));
   const fixoVariavel = fixedVsVariable(doc.transactions, categorias, mes);
 
+  // ---- histórico: tendência, não projeção ----
+  const historicoMensal = monthlySpend(doc.transactions, todayISO, { months: 6 });
+  const { dias: calendarioDias, primeiroDiaSemana } = dailyNet(doc.transactions, mes);
+  const piorDiaMes = worstDay(calendarioDias);
+
   // ---- vazamentos e diagnóstico ----
   const vazamentos = scan(doc.transactions, todayISO);
   const saude = diagnose({
@@ -197,6 +203,10 @@ export function derive(doc, todayISO = today()) {
     categoriasFixas,
     piorCategoria: orcamento.length ? worst(orcamento) : null,
     fixoVariavel,
+    historicoMensal,
+    calendarioDias,
+    primeiroDiaSemana,
+    piorDiaMes,
     vazamentos,
     saude,
     revisao,

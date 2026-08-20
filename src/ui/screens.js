@@ -570,6 +570,50 @@ function barras(meses) {
     <span style="font-size:10.5px;color:var(--muted)">maior mês ${m(maior, brlShort)}</span></div>`;
 }
 
+/** Barras de gasto dos últimos meses — olhando pra trás, não pra frente. O mês
+ *  corrente entra cinza porque ainda não fechou e sempre parece mais barato. */
+function historicoBarras(meses) {
+  const maior = Math.max(1, ...meses.map((b) => b.cents));
+  const fechados = meses.filter((b) => !b.aberto);
+  const media = fechados.length ? Math.round(fechados.reduce((a, b) => a + b.cents, 0) / fechados.length) : 0;
+  return `<div style="display:flex;align-items:flex-end;gap:6px;height:110px">
+    ${meses.map((b) => `
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%">
+        <div style="width:100%;border-radius:5px 5px 2px 2px;background:${b.aberto ? 'var(--line)' : b.cents ? 'var(--blue)' : 'var(--line)'};
+             height:${Math.max(3, (b.cents / maior) * 78)}%" title="${esc(brl(b.cents))}${b.aberto ? ' · mês em aberto' : ''}"></div>
+        <span style="font-size:8.5px;color:var(--muted);letter-spacing:.03em">${monthAbbr(b.month).slice(0, 3)}</span>
+      </div>`).join('')}
+  </div>
+  <div class="ft"><span style="font-size:10.5px;color:var(--muted)">últimos ${meses.length} meses</span>
+    <span style="font-size:10.5px;color:var(--muted)">média ${m(media, brlShort)}/mês</span></div>`;
+}
+
+const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+/** Grade do mês: verde quem entrou mais que saiu, vermelho o contrário — cor
+ *  mais forte quanto maior o valor do dia, pra ver de cara onde o dinheiro escorre. */
+function calendarioMes(v) {
+  const maxAbs = Math.max(1, ...v.calendarioDias.map((d) => Math.abs(d.cents)));
+  const nivel = (cents) => {
+    const r = Math.abs(cents) / maxAbs;
+    return r > 0.66 ? 3 : r > 0.33 ? 2 : 1;
+  };
+  const vazias = Array.from({ length: v.primeiroDiaSemana }, () => '<div></div>').join('');
+  const celulas = v.calendarioDias.map((d) => {
+    const classe = d.cents > 0 ? `in-${nivel(d.cents)}` : d.cents < 0 ? `out-${nivel(d.cents)}` : '';
+    return `<div class="cal-dia ${classe}" title="dia ${d.day} · ${d.cents === 0 ? 'sem lançamento' : brl(d.cents)}">${d.day}</div>`;
+  }).join('');
+
+  return `<div class="cal">
+    ${DIAS_SEMANA.map((s) => `<div class="cal-sem">${s}</div>`).join('')}
+    ${vazias}${celulas}
+  </div>
+  <div class="legend" style="margin-top:10px">
+    <span><i style="background:var(--jade)"></i>entrou mais</span>
+    <span><i style="background:var(--red)"></i>saiu mais</span>
+  </div>`;
+}
+
 // ============================================================ DÍVIDAS
 
 function dividas(app) {
@@ -752,13 +796,23 @@ function analise(app) {
     <div class="panel">${curvaCaixa(v.projecao)}</div>
   </div>
 
-  <div class="wrow three">
+  <div class="wrow">
     ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), s.minimumCost.confident
       ? `média de ${s.minimumCost.months} meses`
       : s.minimumCost.source === 'fixos' ? 'dos seus gastos fixos'
       : s.minimumCost.source === 'manual' ? 'do que você digitou' : 'ainda estimando')}
     ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, `alvo ${s.emergency.targetMonths} meses`)}
-    ${kpi('Patrimônio', m(s.netWorth.netCents, brlShort), s.netWorth.netCents < 0 ? 'negativo' : 'líquido')}
+  </div>
+
+  <div class="sec">
+    <div class="sh"><h3>Calendário do mês</h3>
+      ${v.piorDiaMes ? `<a class="warn">pior dia ${v.piorDiaMes.day} · ${m(Math.abs(v.piorDiaMes.cents), brlShort)}</a>` : ''}</div>
+    <div class="panel">${calendarioMes(v)}</div>
+  </div>
+
+  <div class="sec">
+    <div class="sh"><h3>Tendência mensal</h3><a>gasto total por mês</a></div>
+    <div class="panel">${historicoBarras(v.historicoMensal)}</div>
   </div>
 
   ${v.orcamentoVariavel.length ? `
