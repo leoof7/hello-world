@@ -196,10 +196,12 @@ body {
 .say .p { font-size: 11.5px; color: var(--muted); line-height: 1.6; margin-top: 9px; }
 
 /* ---------- listas ---------- */
-.list { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
-.row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; text-align: left; width: 100%; background: none; border: 0; font: inherit; color: inherit; }
+.list { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.row { display: flex; align-items: center; gap: 13px; padding: 14px; cursor: pointer; text-align: left; width: 100%; background: none; border: 0; font: inherit; color: inherit; transition: background-color .12s ease; }
+.row:active { background: var(--surface-2); }
+@media (hover: hover) { .row:hover { background: var(--surface-2); } }
 .row + .row { border-top: 1px solid var(--line-2); }
-.row .ic { width: 38px; height: 38px; border-radius: 11px; background: var(--chip); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.row .ic { width: 40px; height: 40px; border-radius: 12px; background: var(--chip); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .row .ic svg { width: 17px; height: 17px; stroke: var(--ink-2); stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .row .ic.j { background: var(--jade-soft); } .row .ic.j svg { stroke: var(--jade); }
 .row .ic.r { background: var(--red-soft); } .row .ic.r svg { stroke: var(--red); }
