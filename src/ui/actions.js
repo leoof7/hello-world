@@ -97,6 +97,15 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
         <input type="hidden" name="${c.name}" value="${esc(c.value ?? '')}">
       </div>`;
     }
+    if (c.type === 'pilulas') {
+      return `<div class="field"><label>${esc(c.label)}</label>
+        <div class="pilulas" data-pilulas="1">
+          ${c.options.map((o) => `<button type="button" class="pilula c-${esc(o.cor || 'chip')} ${String(o.value) === String(c.value) ? 'on' : ''}"
+            data-pilula-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}
+        </div>
+        <input type="hidden" name="${c.name}" value="${esc(c.value ?? '')}">
+      </div>`;
+    }
     if (c.type === 'cores') {
       return `<div class="field"><label>${esc(c.label)}</label>
         <div class="swatches" data-swatches="1">
@@ -173,6 +182,17 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
           });
         }
 
+        for (const grupo of card.querySelectorAll('.pilulas')) {
+          const escondido = grupo.parentElement.querySelector('input[type="hidden"]');
+          grupo.addEventListener('click', (ev) => {
+            const botao = ev.target.closest('.pilula');
+            if (!botao) return;
+            grupo.querySelectorAll('.pilula').forEach((b) => b.classList.toggle('on', b === botao));
+            escondido.value = botao.dataset.pilulaValue;
+            escondido.dispatchEvent(new Event('change'));
+          });
+        }
+
         for (const grupo of card.querySelectorAll('.swatches')) {
           const escondido = grupo.parentElement.querySelector('input[type="hidden"]');
           grupo.addEventListener('click', (ev) => {
@@ -207,10 +227,84 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
   );
 }
 
+/**
+ * Um item da fila. Devolve true se categorizou (a fila segue) e false se a
+ * pessoa cancelou (a fila para).
+ */
+async function categorizarUm(id) {
+  const tx = app.doc.transactions.find((t) => t.id === id);
+  if (!tx) return false;
+
+  const sugerida = app.view.revisao.find((t) => t.id === id)?.categoryId || '';
+  const naFila = app.view.revisao.length;
+  const entrada = tx.amountCents > 0;
+
+  const r = await form(
+    tx.description,
+    `${entrada ? 'Entrou' : 'Saiu'} ${brl(Math.abs(tx.amountCents))} · ${formatShort(tx.date)}${naFila > 1 ? ` · ${naFila} na fila` : ''}`,
+    [
+      { name: 'categoryId', label: 'Categoria', type: 'pilulas', value: sugerida, options: opcoesCategoriaComCor() },
+      { name: 'sempre', label: 'Guardar para os próximos desta contraparte', type: 'checkbox', value: true },
+    ],
+    { ok: 'Categorizar' }
+  );
+  if (!r) return false;
+
+  const categoryId = r.categoryId === NOVA_CATEGORIA ? await resolverCategoria(r.categoryId) : r.categoryId;
+  if (r.categoryId === NOVA_CATEGORIA && !categoryId) return false; // desistiu de criar
+
+  await commit((d) => {
+    const alvo = d.transactions.find((t) => t.id === id);
+    if (alvo) alvo.categoryId = categoryId || null;
+    if (r.sempre && categoryId) d.memory = learn(d.memory || {}, tx, { categoryId });
+  });
+  return true;
+}
+
+/** `__nova` abre o campo de criar na hora — categorizar sem sair pra outra tela. */
+const NOVA_CATEGORIA = '__nova';
+
 const opcoesCategoria = () => [
   { value: '', label: 'sem categoria' },
   ...app.doc.categories.map((c) => ({ value: c.id, label: c.name })),
+  { value: NOVA_CATEGORIA, label: '+ Criar categoria…' },
 ];
+
+/** As mesmas opções, mas carregando a cor de cada categoria para as pílulas. */
+const opcoesCategoriaComCor = () => [
+  ...app.doc.categories.map((c) => ({ value: c.id, label: c.name, cor: c.color || 'chip' })),
+  { value: NOVA_CATEGORIA, label: '+ Criar', cor: 'nova' },
+];
+
+/**
+ * Troca `__nova` pela categoria recém-criada. Devolve o id final, ou null se
+ * a pessoa desistiu — quem chama decide o que fazer com isso.
+ */
+async function resolverCategoria(valor) {
+  if (valor !== NOVA_CATEGORIA) return valor;
+
+  const r = await form('Nova categoria', 'O nome é seu — "Pix", "Vó", "Bicicleta", o que fizer sentido.', [
+    { name: 'nome', label: 'Nome', type: 'text', placeholder: 'Pix' },
+    { name: 'essential', label: 'É essencial (não dá pra cortar)', type: 'checkbox', value: false,
+      hint: 'entra no custo de vida mínimo, que é a base da reserva de emergência' },
+  ], { ok: 'Criar' });
+  if (!r?.nome?.trim()) return null;
+
+  const nome = r.nome.trim();
+  const existente = app.doc.categories.find((c) => igual(c.name, nome));
+  if (existente) { toast(`"${existente.name}" já existe.`); return existente.id; }
+
+  const nova = {
+    id: novoId('cat'),
+    name: nome,
+    color: 'jade',
+    essential: !!r.essential,
+    fixed: false,
+    custom: true,
+  };
+  await commit((d) => { d.categories = [...d.categories, nova]; }, { redraw: false });
+  return nova.id;
+}
 
 const opcoesOrigem = () => [
   ...app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: `${a.name} (conta)` })),
@@ -281,27 +375,30 @@ const ACOES = {
     await interpretarFrase(frase);
   },
 
+  /**
+   * A fila de revisão: categorizou um, o próximo já sobe.
+   *
+   * Antes cada item abria e fechava sozinho, e com dezenove para revisar era
+   * dezenove vezes procurar o próximo na lista. Agora só para quando você
+   * cancela ou quando a fila acaba.
+   */
   async categorizar({ id }) {
-    const tx = app.doc.transactions.find((t) => t.id === id);
-    if (!tx) return;
-    const sugerida = app.view.revisao.find((t) => t.id === id)?.categoryId || '';
-    const r = await form(
-      tx.description,
-      `${brl(tx.amountCents)} · ${formatShort(tx.date)}`,
-      [
-        { name: 'categoryId', label: 'Categoria', type: 'select', value: sugerida, options: opcoesCategoria() },
-        { name: 'sempre', label: 'Guardar para os próximos desta contraparte', type: 'checkbox', value: true },
-      ],
-      { ok: 'Categorizar' }
-    );
-    if (!r) return;
+    let atual = id;
+    let feitos = 0;
 
-    await commit((d) => {
-      const alvo = d.transactions.find((t) => t.id === id);
-      if (alvo) alvo.categoryId = r.categoryId || null;
-      if (r.sempre && r.categoryId) d.memory = learn(d.memory || {}, tx, { categoryId: r.categoryId });
-    });
-    toast(r.sempre ? 'Categorizado — não pergunto de novo.' : 'Categorizado.');
+    while (atual) {
+      const ok = await categorizarUm(atual, feitos);
+      if (!ok) break;
+      feitos++;
+      // o que acabou de sair não pode voltar como "próximo" — se a pessoa
+      // escolheu "sem categoria", ele continua na fila e prenderia o laço
+      atual = app.view.revisao.find((t) => t.id !== atual)?.id || null;
+    }
+
+    if (feitos === 0) return;
+    toast(app.view.revisao.length
+      ? `${feitos} categorizado${feitos === 1 ? '' : 's'} · faltam ${app.view.revisao.length}`
+      : 'Fila vazia — tudo categorizado.');
   },
 
   // ---- antes de começar ----
@@ -918,6 +1015,13 @@ async function editarLancamento(id, sugestao = {}) {
 
   if (!r.valor) { toast('Faltou o valor.'); return; }
 
+  // '+ Criar categoria' vira categoria de verdade antes de virar dado salvo.
+  if (r.categoryId === NOVA_CATEGORIA) {
+    const criada = await resolverCategoria(r.categoryId);
+    if (!criada) return;
+    r.categoryId = criada;
+  }
+
   const entradaFinal = r.entrada === 'entrada';
   const [tipo, origemId] = r.origem.split(':');
 
@@ -1429,6 +1533,12 @@ async function editarRecorrente(id, kind) {
     await commit((d) => { d.recurring = d.recurring.filter((x) => x.id !== id); });
     toast('Apagado.');
     return;
+  }
+
+  if (r.categoryId === NOVA_CATEGORIA) {
+    const criada = await resolverCategoria(r.categoryId);
+    if (!criada) return;
+    r.categoryId = criada;
   }
 
   const registro = {

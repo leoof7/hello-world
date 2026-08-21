@@ -271,7 +271,7 @@ test('documento antigo sem versão ganha os campos novos sem perder os antigos',
   };
   const { document: novo, applied } = migrate(antigo);
 
-  assert.deepEqual(applied, [1, 2], 'rodou todas as migrações pendentes, em ordem');
+  assert.deepEqual(applied, [1, 2, 3], 'rodou todas as migrações pendentes, em ordem');
   assert.equal(novo.version, CURRENT_VERSION);
   assert.deepEqual(novo.transactions, antigo.transactions, 'nada foi perdido');
   assert.equal(novo.profile.name, 'Leandro', 'campo antigo preservado');
@@ -289,7 +289,7 @@ test('projetos de vida viram metas sem perder as categorias que acompanhavam', a
   };
   const { document: novo, applied } = migrate(antigo);
 
-  assert.deepEqual(applied, [2]);
+  assert.deepEqual(applied, [2, 3]);
   assert.equal(novo.goals.length, 2, 'a meta que já existia mais o projeto convertido');
 
   const reserva = novo.goals.find((g) => g.id === 'g-res');
@@ -392,4 +392,60 @@ test('o mínimo da dívida vence no dia informado, não no dia do cadastro', () 
     !agendados.some((e) => e.date === HOJE),
     'e nenhum cai hoje só porque a dívida foi cadastrada hoje',
   );
+});
+
+test('a lista enxuta de categorias devolve o que saiu para a revisão, sem apagar', async () => {
+  const { migrate } = await import('../src/data/migrations.js');
+  const antigo = {
+    version: 2,
+    categories: [
+      { id: 'moradia', name: 'Moradia', essential: true, fixed: true },
+      { id: 'viagem', name: 'Viagem' },
+      { id: 'mercado', name: 'Mercado' },
+    ],
+    transactions: [
+      { id: 't1', categoryId: 'viagem', amountCents: -50000, date: '2026-07-01' },
+      { id: 't2', categoryId: 'mercado', amountCents: -9000, date: '2026-07-02' },
+    ],
+    recurring: [{ id: 'r1', categoryId: 'moradia', amountCents: 90000, kind: 'expense' }],
+    budgets: { viagem: 100000, mercado: 80000 },
+  };
+  const { document: novo } = migrate(antigo);
+
+  const ids = novo.categories.map((c) => c.id);
+  assert.ok(!ids.includes('viagem'), 'a categoria que saiu some da lista');
+  assert.ok(ids.includes('moradia'), 'Moradia fica — o gasto fixo depende dela');
+  assert.ok(ids.includes('pix-interno'), 'as três de Pix entram');
+
+  const t1 = novo.transactions.find((t) => t.id === 't1');
+  assert.equal(t1.categoryId, null, 'o lançamento volta para a fila de revisão');
+  assert.equal(t1.categoriaAnterior, 'Viagem', 'mas guarda o nome do que era');
+  assert.equal(novo.transactions.find((t) => t.id === 't2').categoryId, 'mercado', 'o resto não é tocado');
+
+  assert.equal(novo.recurring[0].categoryId, 'moradia', 'gasto fixo em categoria mantida segue igual');
+  assert.deepEqual(Object.keys(novo.budgets), ['mercado'], 'teto de categoria que saiu vai junto');
+});
+
+test('Pix entre contas não conta como gasto do mês', async () => {
+  const { monthlySpend } = await import('../src/core/history.js');
+  const tx = [
+    { date: '2026-08-05', competence: '2026-08', amountCents: -50000, categoryId: 'pix-interno' },
+    { date: '2026-08-06', competence: '2026-08', amountCents: -9000, categoryId: 'mercado' },
+  ];
+  const meses = monthlySpend(tx, HOJE, { months: 1 });
+  assert.equal(meses[0].cents, 9000, 'só o mercado conta — mover entre contas não é gastar');
+});
+
+test('o exemplo não aponta para categoria que não existe', async () => {
+  const { CATEGORIES } = await import('../src/seed/categories.js');
+  const validas = new Set(CATEGORIES.map((c) => c.id));
+  const doc = seedDocument(HOJE);
+  const orfas = new Set();
+
+  for (const t of doc.transactions) if (t.categoryId && !validas.has(t.categoryId)) orfas.add(t.categoryId);
+  for (const r of doc.recurring) if (r.categoryId && !validas.has(r.categoryId)) orfas.add(r.categoryId);
+  for (const b of Object.keys(doc.budgets)) if (!validas.has(b)) orfas.add(`teto:${b}`);
+  for (const g of doc.goals) for (const c of g.categoryIds || []) if (!validas.has(c)) orfas.add(`meta:${c}`);
+
+  assert.deepEqual([...orfas], [], 'categoria órfã no exemplo vira "sem categoria" na tela, calada');
 });

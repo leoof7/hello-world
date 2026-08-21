@@ -6,6 +6,16 @@
 
 import { monthKey, addMonthKey, parts, lastDayOfMonth } from './dates.js';
 
+/**
+ * Dinheiro que só mudou de bolso não é gasto.
+ *
+ * Um Pix entre as suas próprias contas sai de um lado e entra no outro. Contar
+ * a saída como gasto infla o mês por um valor que ninguém gastou — e é o tipo
+ * de erro que faz a pessoa não reconhecer os próprios números e largar o app.
+ */
+export const NEUTRAS = new Set(['pix-interno']);
+const ehNeutra = (t) => NEUTRAS.has(t.categoryId);
+
 /** Gasto total por mês, dos últimos `months` meses (o corrente entra em aberto). */
 export function monthlySpend(transactions, todayISO, { months = 6 } = {}) {
   const atual = monthKey(todayISO);
@@ -14,6 +24,7 @@ export function monthlySpend(transactions, todayISO, { months = 6 } = {}) {
 
   for (const t of transactions) {
     if (t.amountCents >= 0) continue;
+    if (ehNeutra(t)) continue;
     const comp = t.competence || monthKey(t.date);
     if (comp < desde || comp > atual) continue;
     porMes.set(comp, (porMes.get(comp) || 0) + Math.abs(t.amountCents));

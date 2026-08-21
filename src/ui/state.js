@@ -13,7 +13,7 @@ import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, min
 import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js';
 import { scan } from '../core/leaks.js';
 import { diagnose } from '../core/health.js';
-import { monthlySpend, dailyNet, worstDay } from '../core/history.js';
+import { monthlySpend, dailyNet, worstDay, NEUTRAS } from '../core/history.js';
 import { categorizeAll } from '../core/categorize.js';
 import { MERCHANTS } from '../seed/categories.js';
 import { PADROES } from '../config.js';
@@ -234,6 +234,7 @@ function custoDeVida(doc, mesAtual, fixosCents) {
     if (t.amountCents >= 0) continue;
     if (t.installment) continue;               // parcela entra separada
     if (t.categoryId === 'taxas') continue;    // juros são conta da dívida
+    if (NEUTRAS.has(t.categoryId)) continue;   // trocar de bolso não é gastar
     const comp = t.competence || monthKey(t.date);
     if (comp >= mesAtual) continue;            // mês corrente ainda está aberto
     porMes.set(comp, (porMes.get(comp) || 0) + Math.abs(t.amountCents));

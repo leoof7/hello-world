@@ -63,8 +63,7 @@ export function seedDocument(todayISO = '2026-08-19') {
   ];
 
   doc.budgets = {
-    mercado: 90000, delivery: 30000, transporte: 40000, combustivel: 40000,
-    lazer: 40000, farmacia: 20000, assinaturas: 15000, vestuario: 20000,
+    mercado: 90000, delivery: 30000, combustivel: 40000, lazer: 40000, presentes: 15000,
   };
 
   doc.goals = [
@@ -72,7 +71,7 @@ export function seedDocument(todayISO = '2026-08-19') {
     { id: 'g-ipva', name: 'IPVA 2027', targetCents: 168000, savedCents: 42000, monthlyCents: 14000, status: 'ativo', dueMonth: addMonthKey(mes, 5) },
     { id: 'g-cel', name: 'Trocar o celular', targetCents: 350000, savedCents: 20000, monthlyCents: 0, status: 'pausado' },
     { id: 'g-chile', name: 'Chile em 2027', targetCents: 800000, savedCents: 0, monthlyCents: 0, status: 'pausado' },
-    { id: 'g-carro', name: 'Carro', targetCents: 0, savedCents: 0, monthlyCents: 0, status: 'ativo', kind: 'projeto', categoryIds: ['combustivel', 'transporte'] },
+    { id: 'g-carro', name: 'Carro', targetCents: 0, savedCents: 0, monthlyCents: 0, status: 'ativo', kind: 'projeto', categoryIds: ['combustivel'] },
     { id: 'g-casa', name: 'Casa', targetCents: 0, savedCents: 0, monthlyCents: 0, status: 'ativo', kind: 'projeto', categoryIds: ['moradia', 'contas'] },
   ];
 
@@ -85,9 +84,9 @@ export function seedDocument(todayISO = '2026-08-19') {
 
   // ---- parcelamentos em aberto ----
   const parceladas = [
-    { id: 'cp-note', cardId: 'nu', date: addMonths(todayISO, -2).slice(0, 8) + '12', totalCents: 500000, count: 12, description: 'Notebook Dell', categoryId: 'eletronicos' },
-    { id: 'cp-gol', cardId: 'nu', date: addMonths(todayISO, -1).slice(0, 8) + '15', totalCents: 173898, count: 6, description: 'GOL · Florianópolis', categoryId: 'viagem' },
-    { id: 'cp-dent', cardId: 'nu', date: addMonths(todayISO, -8).slice(0, 8) + '08', totalCents: 483590, count: 10, description: 'Dentista', categoryId: 'saude' },
+    { id: 'cp-note', cardId: 'nu', date: addMonths(todayISO, -2).slice(0, 8) + '12', totalCents: 500000, count: 12, description: 'Notebook Dell', categoryId: 'lazer' },
+    { id: 'cp-gol', cardId: 'nu', date: addMonths(todayISO, -1).slice(0, 8) + '15', totalCents: 173898, count: 6, description: 'GOL · Florianópolis', categoryId: 'lazer' },
+    { id: 'cp-dent', cardId: 'nu', date: addMonths(todayISO, -8).slice(0, 8) + '08', totalCents: 483590, count: 10, description: 'Dentista', categoryId: 'contas' },
   ];
 
   const transacoes = [];
@@ -101,32 +100,32 @@ export function seedDocument(todayISO = '2026-08-19') {
     { date: `${mes}-15`, cardId: 'nu', description: 'PAO DE ACUCAR', amountCents: -51230, categoryId: 'mercado', method: 'credit' },
     { date: `${mes}-12`, cardId: 'nu', description: 'IFOOD *CLUB', amountCents: -6890, categoryId: 'delivery', method: 'credit' },
     { date: `${mes}-14`, cardId: 'nu', description: 'PAGSEGURO *AUTOPOSTO', amountCents: -24000, method: 'credit' },
-    { date: `${mes}-05`, cardId: 'nu', description: 'NETFLIX', amountCents: -4490, categoryId: 'assinaturas', method: 'credit' },
-    { date: `${mes}-05`, cardId: 'nu', description: 'SPOTIFY', amountCents: -2190, categoryId: 'assinaturas', method: 'credit' },
-    { date: `${mes}-08`, cardId: 'nu', description: 'DROGASIL', amountCents: -8745, categoryId: 'farmacia', method: 'credit' },
+    { date: `${mes}-05`, cardId: 'nu', description: 'NETFLIX', amountCents: -4490, categoryId: 'lazer', method: 'credit' },
+    { date: `${mes}-05`, cardId: 'nu', description: 'SPOTIFY', amountCents: -2190, categoryId: 'lazer', method: 'credit' },
+    { date: `${mes}-08`, cardId: 'nu', description: 'DROGASIL', amountCents: -8745, categoryId: 'mercado', method: 'credit' },
     { date: `${mes}-16`, accountId: 'ac-nu', description: 'Pix enviado para MARINA COSTA', amountCents: -12000, method: 'pix' },
     { date: `${mes}-11`, accountId: 'ac-nu', description: 'Pix recebido de CLIENTE SERVICO', amountCents: 62000, method: 'pix', extraordinary: true },
     { date: `${mes}-09`, accountId: 'ac-nu', description: 'Trader esportivo', amountCents: 16000, method: 'pix', extraordinary: true },
-    { date: `${mes}-05`, accountId: 'ac-nu', description: 'PAGAMENTO SALARIO', amountCents: 840000, categoryId: 'renda', method: 'transfer' },
+    { date: `${mes}-05`, accountId: 'ac-nu', description: 'PAGAMENTO SALARIO', amountCents: 840000, categoryId: 'pix-entrada', method: 'transfer' },
     { date: `${mes}-03`, cardId: 'it', description: 'CARREFOUR', amountCents: -34210, categoryId: 'mercado', method: 'credit' },
-    { date: `${mes}-01`, cardId: 'it', description: 'UBER *TRIP', amountCents: -3820, categoryId: 'transporte', method: 'credit' },
+    { date: `${mes}-01`, cardId: 'it', description: 'UBER *TRIP', amountCents: -3820, categoryId: 'combustivel', method: 'credit' },
     { date: `${mes}-02`, cardId: 'it', description: 'POSTO SHELL BR101', amountCents: -19870, categoryId: 'combustivel', method: 'credit' },
   ];
 
   // histórico dos meses anteriores, para os gráficos e o custo de vida
   for (const m of [mesAnterior, dois, tres]) {
     avulsos.push(
-      { date: `${m}-05`, accountId: 'ac-nu', description: 'PAGAMENTO SALARIO', amountCents: 840000, categoryId: 'renda', method: 'transfer' },
+      { date: `${m}-05`, accountId: 'ac-nu', description: 'PAGAMENTO SALARIO', amountCents: 840000, categoryId: 'pix-entrada', method: 'transfer' },
       { date: `${m}-10`, accountId: 'ac-nu', description: 'ALUGUEL', amountCents: -180000, categoryId: 'moradia', method: 'transfer' },
       { date: `${m}-10`, accountId: 'ac-nu', description: 'CONDOMINIO', amountCents: -62000, categoryId: 'moradia', method: 'transfer' },
       { date: `${m}-15`, accountId: 'ac-nu', description: 'ENEL', amountCents: -28000, categoryId: 'contas', method: 'transfer' },
       { date: `${m}-15`, cardId: 'nu', description: 'PAO DE ACUCAR', amountCents: -48000, categoryId: 'mercado', method: 'credit' },
-      { date: `${m}-05`, cardId: 'nu', description: 'NETFLIX', amountCents: m === mes ? -4490 : -3990, categoryId: 'assinaturas', method: 'credit' },
-      { date: `${m}-05`, cardId: 'nu', description: 'SPOTIFY', amountCents: -2190, categoryId: 'assinaturas', method: 'credit' },
+      { date: `${m}-05`, cardId: 'nu', description: 'NETFLIX', amountCents: m === mes ? -4490 : -3990, categoryId: 'lazer', method: 'credit' },
+      { date: `${m}-05`, cardId: 'nu', description: 'SPOTIFY', amountCents: -2190, categoryId: 'lazer', method: 'credit' },
     );
   }
   // a cobrança duplicada que o caça-vazamentos precisa encontrar
-  avulsos.push({ date: `${mesAnterior}-07`, cardId: 'nu', description: 'SPOTIFY', amountCents: -2190, categoryId: 'assinaturas', method: 'credit' });
+  avulsos.push({ date: `${mesAnterior}-07`, cardId: 'nu', description: 'SPOTIFY', amountCents: -2190, categoryId: 'lazer', method: 'credit' });
 
   avulsos.forEach((t, i) => {
     transacoes.push({

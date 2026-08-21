@@ -2,26 +2,30 @@
 //
 // `essential` marca o que entra no custo de vida mínimo — o que você não
 // consegue cortar. `fixed` marca o que não muda de mês para mês.
+// `neutra` fica de fora das somas de gasto: dinheiro que só mudou de lugar
+// não é dinheiro que saiu da sua vida.
+//
+// A lista nasce curta de propósito. Categoria demais vira categoria nenhuma:
+// dezoito opções na hora de classificar um Pix fazem a pessoa desistir e
+// deixar tudo sem categoria. O que faltar se cria em um toque, com o nome que
+// fizer sentido pra quem usa.
 
 export const CATEGORIES = [
   { id: 'moradia', name: 'Moradia', color: 'blue', essential: true, fixed: true },
   { id: 'contas', name: 'Contas da casa', color: 'blue', essential: true, fixed: true },
   { id: 'mercado', name: 'Mercado', color: 'jade', essential: true, fixed: false },
   { id: 'delivery', name: 'Delivery e restaurante', color: 'amber', essential: false, fixed: false },
-  { id: 'transporte', name: 'Transporte', color: 'violet', essential: true, fixed: false },
   { id: 'combustivel', name: 'Combustível', color: 'violet', essential: true, fixed: false },
-  { id: 'saude', name: 'Saúde', color: 'jade', essential: true, fixed: false },
-  { id: 'farmacia', name: 'Farmácia', color: 'jade', essential: true, fixed: false },
-  { id: 'assinaturas', name: 'Assinaturas', color: 'red', essential: false, fixed: true },
   { id: 'lazer', name: 'Lazer', color: 'amber', essential: false, fixed: false },
-  { id: 'vestuario', name: 'Roupas', color: 'amber', essential: false, fixed: false },
-  { id: 'educacao', name: 'Educação', color: 'blue', essential: false, fixed: true },
   { id: 'pet', name: 'Pet', color: 'jade', essential: true, fixed: false },
   { id: 'presentes', name: 'Presentes', color: 'amber', essential: false, fixed: false },
-  { id: 'eletronicos', name: 'Eletrônicos', color: 'violet', essential: false, fixed: false },
-  { id: 'viagem', name: 'Viagem', color: 'amber', essential: false, fixed: false },
+  { id: 'pix-entrada', name: 'Pix recebido', color: 'jade', essential: false, fixed: false },
+  { id: 'pix-saida', name: 'Pix saída', color: 'red', essential: false, fixed: false },
+  // Entre as SUAS contas o dinheiro não sumiu nem apareceu — só trocou de
+  // bolso. Contar isso como gasto infla o mês inteiro por um valor que você
+  // nunca gastou, e do outro lado infla a renda pelo mesmo valor.
+  { id: 'pix-interno', name: 'Pix entre contas', color: 'steel', essential: false, fixed: false, neutra: true },
   { id: 'taxas', name: 'Tarifas e juros', color: 'red', essential: false, fixed: false },
-  { id: 'renda', name: 'Renda', color: 'jade', essential: false, fixed: false },
 ];
 
 /**

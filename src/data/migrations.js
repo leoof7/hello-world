@@ -7,7 +7,7 @@
 // Parece detalhe de engenheiro. É o motivo pelo qual metade dos apps pequenos
 // perde os dados dos usuários na terceira atualização.
 
-export const CURRENT_VERSION = 2;
+export const CURRENT_VERSION = 3;
 
 /** Documento zerado — a forma canônica de tudo que o app guarda. */
 export function emptyDocument() {
@@ -82,6 +82,49 @@ const MIGRATIONS = {
       goals: [...(doc.goals || []).map((g) => ({ categoryIds: [], ...g })), ...projetosComoMetas],
       projects: [],
       version: 2,
+    };
+  },
+  // 3: lista de categorias enxuta, mais as três de Pix.
+  //
+  // Dezoito categorias faziam a pessoa desistir de classificar. Ficam as que
+  // se usa de verdade; o resto se cria em um toque quando fizer falta.
+  //
+  // Migração não apaga: o que estava categorizado no que saiu volta para a
+  // fila de revisão, com o nome original preservado em `categoriaAnterior`
+  // para você reconhecer o que era. Moradia e Contas da casa ficam de fora do
+  // corte de propósito — os gastos fixos apontam para elas e o custo de vida
+  // mínimo sai da soma delas.
+  3: (doc) => {
+    const removidas = new Set([
+      'transporte', 'saude', 'farmacia', 'assinaturas',
+      'vestuario', 'educacao', 'eletronicos', 'viagem', 'renda',
+    ]);
+    const nomeAntigo = Object.fromEntries((doc.categories || []).map((c) => [c.id, c.name]));
+
+    const novas = [
+      { id: 'pix-entrada', name: 'Pix recebido', color: 'jade', essential: false, fixed: false },
+      { id: 'pix-saida', name: 'Pix saída', color: 'red', essential: false, fixed: false },
+      { id: 'pix-interno', name: 'Pix entre contas', color: 'steel', essential: false, fixed: false, neutra: true },
+    ];
+    const jaTem = new Set((doc.categories || []).map((c) => c.id));
+
+    return {
+      ...doc,
+      categories: [
+        ...(doc.categories || []).filter((c) => !removidas.has(c.id)),
+        ...novas.filter((c) => !jaTem.has(c.id)),
+      ],
+      transactions: (doc.transactions || []).map((t) =>
+        removidas.has(t.categoryId)
+          ? { ...t, categoryId: null, categoriaAnterior: nomeAntigo[t.categoryId] || t.categoryId }
+          : t),
+      // Gasto fixo apontando para categoria que saiu fica sem categoria, mas
+      // continua existindo: o valor e o dia é que sustentam a projeção.
+      recurring: (doc.recurring || []).map((r) =>
+        removidas.has(r.categoryId) ? { ...r, categoryId: null } : r),
+      budgets: Object.fromEntries(
+        Object.entries(doc.budgets || {}).filter(([id]) => !removidas.has(id))),
+      version: 3,
     };
   },
 };
