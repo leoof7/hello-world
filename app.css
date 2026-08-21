@@ -681,3 +681,81 @@ body {
   font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center;
   font-family: 'IBM Plex Mono', monospace;
 }
+
+/* ---------- gráficos ---------- */
+/* Anel: o número no meio é o que se lê; o arco é o que se entende sem ler. */
+.anel { position: relative; flex-shrink: 0; }
+.anel svg { display: block; }
+.anel-meio {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px; pointer-events: none; text-align: center;
+}
+.anel-num { font-size: 25px; font-weight: 600; letter-spacing: -.03em; color: var(--ink); line-height: 1; }
+.anel-leg { font-size: 9.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+
+.anel-linha { display: flex; align-items: center; gap: 18px; }
+.anel-texto { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.anel-texto .t { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: -.01em; }
+.anel-texto .s { font-size: 12px; color: var(--muted); line-height: 1.55; }
+
+/* Rosca: no máximo cinco fatias mais "outros". Doze fatias de 2% é mancha. */
+.rosca { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.rosca-leg { list-style: none; flex: 1; min-width: 130px; display: flex; flex-direction: column; gap: 7px; }
+.rosca-leg li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.rosca-leg i { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.rosca-nome { flex: 1; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rosca-pct { color: var(--muted); font-size: 11.5px; }
+
+/* Barra empilhada: se as cores enchem a barra, o mês não fecha. */
+.empilha { display: flex; flex-direction: column; gap: 12px; }
+.empilha-barra {
+  display: flex; height: 30px; border-radius: 9px; overflow: hidden;
+  background: var(--line); box-shadow: inset 0 1px 2px rgba(0,0,0,.06);
+}
+.empilha-barra i { display: block; height: 100%; }
+.empilha-barra.estourou { box-shadow: 0 0 0 1.5px var(--red); }
+.empilha-leg { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.empilha-leg li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.empilha-leg i { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.empilha-leg span { flex: 1; color: var(--ink-2); }
+.empilha-leg b { font-size: 12.5px; color: var(--ink); }
+.empilha-sobra span, .empilha-sobra b { color: var(--muted); }
+
+/* Termômetro: a marca é onde você deveria estar hoje. */
+.termo { width: 100%; }
+.termo-trilho { position: relative; height: 9px; border-radius: 100px; background: var(--line); overflow: visible; }
+.termo-cheio { display: block; height: 100%; border-radius: 100px; }
+.termo-marca {
+  position: absolute; top: -4px; width: 2px; height: 17px; border-radius: 2px;
+  background: var(--ink-2); opacity: .55; transform: translateX(-1px);
+}
+
+/* ---------- plano de saída ---------- */
+/* Fechado mostra a data e a linha descendo. Aberto mostra mês a mês. Doze
+   meses de detalhe no Painel é parede de número — ninguém lê, e quem lê perde
+   a data, que era a única coisa que importava. */
+.plano-dobra > summary { display: block; padding: 0; }
+.plano-dobra > summary::-webkit-details-marker { display: none; }
+.plano-topo {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 18px; display: flex; flex-direction: column; gap: 8px;
+}
+.plano-topo .q { font-size: clamp(19px, 5.6vw, 22px); line-height: 1.32; }
+.plano-topo .p { font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+.plano-linha { width: 100%; height: 64px; margin-top: 6px; display: block; }
+.plano-dobra[open] .plano-topo { border-radius: var(--r-lg) var(--r-lg) 0 0; }
+
+.plano-mes { border-top: 1px solid var(--line-2); }
+.plano-mes:first-child { border-top: 0; }
+.plano-mes > summary {
+  display: flex; align-items: center; gap: 13px; padding: 13px 14px; cursor: pointer; list-style: none;
+}
+.plano-mes > summary::-webkit-details-marker { display: none; }
+.plano-mes > summary:active { background: var(--surface-2); }
+.plano-mes .bd { flex: 1; min-width: 0; }
+.plano-mes .t { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.plano-mes .s { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.plano-mes .rt { text-align: right; flex-shrink: 0; }
+.plano-mes .amt { font-size: 13px; font-weight: 600; }
+.plano-mes .dt { font-size: 9.5px; color: var(--faint); }
+.plano-detalhe { padding: 0 14px 14px 66px; }

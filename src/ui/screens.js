@@ -16,6 +16,7 @@ const corAtualNome = (app) => (app.doc.settings?.corLivre
   : (CORES.find((c) => c.id === (app.doc.settings?.corId || 'jade'))?.nome || 'Verde').toLowerCase());
 import { backupMessage } from '../data/backup.js';
 import { esc, icon, sparkline, colunaDia, pilulasDaLinha } from './dom.js';
+import { anel, anelDePassos, rosca, barraEmpilhada, termometro } from './graficos.js';
 import { wire } from './actions.js';
 
 const TABS = [
@@ -432,15 +433,88 @@ function consultor(v) {
       `No ritmo de hoje você gasta ${brl(c.perDayCents)} por dia nessa categoria. Para fechar o mês, ${brl(c.safePerDayCents)} por dia.`);
   }
 
-  if (v.plano?.done) {
-    return diz('jade', 'Onde você está',
-      `No ritmo de hoje você fica livre em ${formatMonthKey(v.plano.freeMonth)}.`,
-      `São ${v.plano.monthsCount} meses pagando ${brl(v.orcamentoDivida)}. Cada real a mais por mês antecipa essa data.`);
-  }
+  if (v.plano?.done) return balaoDoPlano(v);
 
   return diz('jade', 'Onde você está',
     `Você tem ${brl(v.livre.cents)} livres até ${v.proximaEntrada ? formatShort(v.proximaEntrada) : 'o fim do período'}.`,
     'Isso já é o que sobra depois de honrar fatura, contas fixas e parcelas do período.');
+}
+
+/**
+ * O plano de saída, fechado por padrão.
+ *
+ * Fechado mostra só a linha descendo e a data. Aberto mostra mês a mês: o que
+ * cada mês custa de juro, quanto abate, e quais dívidas ainda estão vivas.
+ *
+ * A separação é o ponto. Doze meses de detalhe no Painel é parede de número —
+ * ninguém lê, e quem lê perde a única informação que importava, que é a data.
+ * Mas quem quer conferir precisa poder conferir, senão a data vira fé.
+ */
+function balaoDoPlano(v) {
+  const p = v.plano;
+  const meses = p.months.slice(0, 24);
+  const pico = Math.max(1, ...meses.map((x) => x.totalCents));
+
+  const largura = 300;
+  const altura = 64;
+  const pontos = meses.map((x, i) => {
+    const px = (i / Math.max(1, meses.length - 1)) * largura;
+    const py = altura - (x.totalCents / pico) * (altura - 6) - 3;
+    return `${px.toFixed(1)},${py.toFixed(1)}`;
+  });
+
+  return `
+  <details class="sec dobra plano-dobra">
+    <summary>
+      <div class="plano-topo">
+        <div class="k eb" style="color:var(--jade)">Onde você está</div>
+        <div class="q ser">No ritmo de hoje você fica livre em ${esc(formatMonthKey(p.freeMonth))}.</div>
+        <div class="p">São ${p.monthsCount} ${p.monthsCount === 1 ? 'mês' : 'meses'} pagando
+          ${esc(brl(v.orcamentoDivida))}. Cada real a mais por mês antecipa essa data.</div>
+        <svg class="plano-linha" viewBox="0 0 ${largura} ${altura}" preserveAspectRatio="none" aria-hidden="true">
+          <polyline points="${pontos.join(' ')}" fill="none" stroke="var(--jade)" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="${largura}" cy="${altura - 3}" r="4" fill="var(--jade)"/>
+        </svg>
+        <div class="chart-eixo">
+          <span>hoje · ${m(p.months[0]?.totalCents || 0, brlShort)}</span>
+          <span>${esc(formatMonthKey(p.freeMonth))} · R$ 0</span>
+        </div>
+        <span class="dobra-nota">toque para ver mês a mês e quais dívidas entram</span>
+      </div>
+    </summary>
+
+    <div class="list" style="margin-top:12px">
+      ${meses.map((x) => {
+        const vivas = x.balances.filter((b) => b.cents > 0);
+        const abateu = Math.max(0, x.paidCents - x.interestCents);
+        return `
+        <details class="plano-mes">
+          <summary>
+            <div class="dia">
+              <span class="dia-n" style="font-size:11px">${esc(monthAbbr(x.month))}</span>
+              <span class="dia-m">${esc(x.month.slice(2, 4))}</span>
+            </div>
+            <div class="bd">
+              <div class="t">${esc(formatMonthKey(x.month, { long: true }))}</div>
+              <div class="s">${pilulasDaLinha([
+                `abate ${brlShort(abateu)}`,
+                x.interestCents > 0 ? `juro ${brlShort(x.interestCents)}` : null,
+                vivas.length ? `${vivas.length} ${vivas.length === 1 ? 'dívida' : 'dívidas'}` : 'quitado',
+              ])}</div>
+            </div>
+            <div class="rt"><div class="amt num">${m(x.totalCents, brlShort)}</div><div class="dt">ainda deve</div></div>
+          </summary>
+          ${vivas.length ? `<div class="plano-detalhe">
+            ${vivas.map((b) => `<div class="ft" style="margin:0 0 6px">
+              <span style="font-size:11.5px;color:var(--muted)">${esc(b.name)}</span>
+              <span class="num" style="font-size:12px">${m(b.cents)}</span>
+            </div>`).join('')}
+          </div>` : '<div class="plano-detalhe"><span style="font-size:11.5px;color:var(--jade)">Nada mais devendo neste mês.</span></div>'}
+        </details>`;
+      }).join('')}
+    </div>
+  </details>`;
 }
 
 const serieEntradas = (v) =>
@@ -585,12 +659,22 @@ function valeLinha(x) {
       ? `no seu ritmo acaba ${formatShort(x.acabaEm)}`
       : x.proximaRecarga ? `recarrega ${formatShort(x.proximaRecarga)}` : 'sem recarga cadastrada';
 
-  return `<button class="row" data-act="editar-cartao" data-id="${esc(x.cardId)}">
+  // Quanto do ciclo já passou: é onde a marca do termômetro fica. Estar com
+  // menos saldo do que tempo restante é o aviso, e ele aparece antes do texto.
+  const total = x.saldoCents + x.gastoCents;
+  const restaFracao = total > 0 ? x.saldoCents / total : 0;
+  const cicloFracao = x.diasAteRecarga != null && x.diasAteRecarga > 0
+    ? x.diasAteRecarga / 30 : null;
+
+  return `<button class="row" style="flex-wrap:wrap" data-act="editar-cartao" data-id="${esc(x.cardId)}">
     <div class="ic ${aperta ? 'r' : 'j'}">${icon('cartao')}</div>
     <div class="bd"><div class="t">${esc(x.nome)}</div>
       <div class="s">${pilulasDaLinha([quando, x.gastoCents ? `${brlShort(x.gastoCents)} usados` : null])}</div></div>
     <div class="rt"><div class="amt num ${aperta ? 'neg' : 'pos'}">${m(Math.max(0, x.saldoCents))}</div>
       <div class="dt">no vale</div></div>
+    ${total > 0 ? `<div style="flex-basis:100%;padding:2px 0 0">
+      ${termometro({ fracao: restaFracao, marca: cicloFracao, alerta: aperta })}
+    </div>` : ''}
   </button>`;
 }
 
@@ -725,6 +809,16 @@ function historicoBarras(meses) {
  * responde. Cada saída aparece nomeada: número solto não deixa ninguém agir,
  * mas "faturas R$ 1.350" diz onde mexer.
  */
+// Uma cor por tipo de saída, fixa. Cor que muda de significado entre telas é
+// pior que tela sem cor — a pessoa aprende o vermelho ser fatura aqui e ser
+// outra coisa ali.
+const CORES_SAIDA = {
+  faturas: 'var(--violet)',
+  fixos: 'var(--blue)',
+  parcelas: 'var(--amber)',
+  dividas: 'var(--red)',
+};
+
 function fechamentoMes(v) {
   const f = v.fechamento;
   if (!f.entradasCents && !f.totalSaidasCents) return '';
@@ -741,15 +835,20 @@ function fechamentoMes(v) {
         <span style="font-size:12.5px">Entra ${m(f.entradasCents)}</span>
         <span style="font-size:12.5px;color:var(--muted)">Sai ${m(f.totalSaidasCents)}</span>
       </div>
-      <div class="bar"><i style="width:${pct}%;background:${cor}"></i></div>
-      <div class="ft" style="margin:6px 0 12px">
-        <span style="font-size:10.5px;color:var(--muted)">${pct}% da entrada já comprometido</span>
+      ${barraEmpilhada({
+        totalCents: f.entradasCents,
+        sobraRotulo: 'o que sobra',
+        sobraTexto: m(Math.max(0, f.sobraCents), brlShort),
+        partes: f.saidas.map((s) => ({
+          nome: s.rotulo,
+          cents: s.cents,
+          rotulo: m(s.cents, brlShort),
+          cor: CORES_SAIDA[s.id] || 'var(--steel)',
+        })),
+      })}
+      <div class="ft" style="margin:8px 0 12px">
+        <span style="font-size:10.5px;color:${cor}">${pct}% da entrada já comprometido</span>
       </div>
-      ${f.saidas.map((s) => `
-        <div class="ft" style="margin:0 0 7px">
-          <span style="font-size:11.5px;color:var(--muted)">${esc(s.rotulo)}</span>
-          <span class="num" style="font-size:12.5px">${m(s.cents)}</span>
-        </div>`).join('')}
       <div class="ft" style="margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line-2)">
         <span style="font-size:11.5px">${f.fecha ? 'Livre para guardar' : 'Falta'}</span>
         <span class="num" style="font-size:15px;color:${f.fecha ? 'var(--jade)' : 'var(--red)'}">${m(Math.abs(f.sobraCents))}</span>
@@ -846,7 +945,26 @@ function dividas(app) {
   <div class="hero">
     <div class="top"><span class="lbl">Você deve hoje</span></div>
     <div class="big ser">${m(v.dividaTotalCents, brlShort)}</div>
-    <div class="prog"><i style="width:${(v.progresso * 100).toFixed(0)}%"></i></div>
+    ${v.picoCents > 0 ? `
+    <div class="anel-linha" style="margin-top:16px">
+      ${anel({
+        fracao: v.progresso,
+        centro: `${Math.round(v.progresso * 100)}%`,
+        legenda: 'pago',
+        cor: 'var(--jade)',
+        trilho: 'rgba(255,255,255,.12)',
+        tamanho: 108, espessura: 11,
+      })}
+      <div class="anel-texto" style="color:#fff">
+        <div class="t" style="color:#fff">${plano?.done
+          ? `Livre em ${formatMonthKey(plano.freeMonth)}`
+          : 'Sem data com o valor de hoje'}</div>
+        <div class="s" style="color:rgba(255,255,255,.6)">
+          Do pior momento — ${m(v.picoCents, brlShort)} — você já derrubou ${m(v.picoCents - v.dividaTotalCents, brlShort)}.
+          ${plano?.done ? `Faltam ${plano.monthsCount} ${plano.monthsCount === 1 ? 'mês' : 'meses'}.` : ''}
+        </div>
+      </div>
+    </div>` : `<div class="prog"><i style="width:${(v.progresso * 100).toFixed(0)}%"></i></div>`}
     <div class="foot">
       <span class="acc">${plano?.done ? `livre em ${formatMonthKey(plano.freeMonth)} · ${plano.monthsCount} meses` : 'sem data com o valor de hoje'}</span>
       <span class="pill bad">${m(v.jurosDiaCents, (c) => formatCents(c))}/dia</span>
@@ -892,6 +1010,8 @@ function dividas(app) {
     ${v.dividas.map((d, i) => dividaCard(d, i, plano, v)).join('')}
     <button class="btn ghost" data-act="nova-divida" style="width:100%;margin-top:8px">${icon('mais')} Cadastrar outra</button>
   </div>
+
+  ${plano?.done ? balaoDoPlano(v) : ''}
 
   ${v.dividasDesligadas.length ? `
   <details class="sec dobra">
@@ -1084,10 +1204,52 @@ function analise(app) {
     <div class="panel">${curvaCaixa(v.projecao)}</div>
   </div>
 
+  <div class="sec" style="margin-top:0">
+    <div class="sh"><h3>Reserva de emergência</h3><a>${s.emergency.targetMonths} meses é o alvo</a></div>
+    <div class="panel">
+      <div class="anel-linha">
+        ${anelDePassos({
+          feitos: s.emergency.months,
+          total: s.emergency.targetMonths,
+          centro: s.emergency.months >= 1 ? String(Math.floor(s.emergency.months)) : '0',
+          legenda: s.emergency.months === 1 ? 'mês' : 'meses',
+          cor: s.emergency.months >= s.emergency.targetMonths ? 'var(--jade)'
+            : s.emergency.months >= 1 ? 'var(--blue)' : 'var(--amber)',
+        })}
+        <div class="anel-texto">
+          <div class="t">${s.emergency.months >= s.emergency.targetMonths
+            ? 'Reserva completa'
+            : s.emergency.months >= 1
+              ? `Você aguenta ${Math.floor(s.emergency.months)} ${Math.floor(s.emergency.months) === 1 ? 'mês' : 'meses'} sem renda`
+              : 'Ainda não dá um mês'}</div>
+          <div class="s">Guardado ${m(s.emergency.savedCents, brlShort)} de ${m(s.emergency.targetCents, brlShort)}.
+            ${s.emergency.missingCents > 0 ? `Faltam ${m(s.emergency.missingCents, brlShort)}.` : ''}
+            <br>Cada passo do anel é um mês do seu custo mínimo — ${esc(origemCusto)}.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="wrow">
     ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), origemCusto)}
     ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, esc(origemReserva))}
   </div>
+
+  ${s.allocation.totalCents > 0 ? `
+  <div class="sec">
+    <div class="sh"><h3>Para onde foi</h3><a>${m(s.allocation.totalCents, brlShort)} este mês</a></div>
+    <div class="panel">
+      ${rosca({
+        centro: `${Math.round(s.allocation.essentialRatio * 100)}%`,
+        legenda: 'essencial',
+        partes: [
+          { nome: 'Essencial', cents: s.allocation.essentialCents, cor: 'var(--blue)' },
+          { nome: 'Supérfluo', cents: s.allocation.discretionaryCents, cor: 'var(--amber)' },
+          { nome: 'Guardado', cents: s.allocation.investedCents, cor: 'var(--jade)' },
+        ],
+      })}
+    </div>
+  </div>` : ''}
 
   ${v.fixosSemCategoria.length ? `
   <button class="nudge" data-act="fixos" style="width:100%;text-align:left;border:0;font:inherit;margin-top:12px">
