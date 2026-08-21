@@ -557,7 +557,7 @@ function painel(app) {
   </div>` : ''}
 
   <div class="sec">
-    <div class="sh"><h3>MARCADOR-DE-VERSAO-NOVA</h3>${botaoOlho("lancamentos")}<a data-act="novo">Lançar</a></div>
+    <div class="sh"><h3>Últimos lançamentos</h3>${botaoOlho("lancamentos")}<a data-act="novo">Lançar</a></div>
     ${v.lancamentos.length
       ? `<div class="list">${v.lancamentos.slice(0, 8).map((t) => linha(t, v)).join('')}</div>`
       : `<div class="empty">Nada lançado ainda.<br>Toque em <b>Lançar</b> para começar.</div>`}
