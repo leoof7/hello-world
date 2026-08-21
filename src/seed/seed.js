@@ -67,16 +67,13 @@ export function seedDocument(todayISO = '2026-08-19') {
     lazer: 40000, farmacia: 20000, assinaturas: 15000, vestuario: 20000,
   };
 
-  doc.projects = [
-    { id: 'pj-carro', name: 'Carro', categoryIds: ['combustivel', 'transporte'] },
-    { id: 'pj-casa', name: 'Casa', categoryIds: ['moradia', 'contas'] },
-  ];
-
   doc.goals = [
     { id: 'g-res', name: 'Reserva de emergência', targetCents: 2508000, savedCents: 1003200, monthlyCents: 30000, status: 'ativo', kind: 'reserva' },
     { id: 'g-ipva', name: 'IPVA 2027', targetCents: 168000, savedCents: 42000, monthlyCents: 14000, status: 'ativo', dueMonth: addMonthKey(mes, 5) },
     { id: 'g-cel', name: 'Trocar o celular', targetCents: 350000, savedCents: 20000, monthlyCents: 0, status: 'pausado' },
     { id: 'g-chile', name: 'Chile em 2027', targetCents: 800000, savedCents: 0, monthlyCents: 0, status: 'pausado' },
+    { id: 'g-carro', name: 'Carro', targetCents: 0, savedCents: 0, monthlyCents: 0, status: 'ativo', kind: 'projeto', categoryIds: ['combustivel', 'transporte'] },
+    { id: 'g-casa', name: 'Casa', targetCents: 0, savedCents: 0, monthlyCents: 0, status: 'ativo', kind: 'projeto', categoryIds: ['moradia', 'contas'] },
   ];
 
   doc.snapshots = [

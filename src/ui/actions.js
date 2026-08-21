@@ -285,6 +285,33 @@ const ACOES = {
       categories: app.doc.categories,
     });
 
+    // "Coloquei/guardei/depositei X no cofrinho Y" desvia pro depósito direto
+    // — sem isso a frase virava um gasto qualquer, sem ligação nenhuma com o
+    // cofrinho que a pessoa citou.
+    const normFrase = frase.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    if (/cofrinho|cofre|meta\b/.test(normFrase) && lido.amountCents != null) {
+      const metaAchada = app.doc.goals.find((g) => {
+        const nome = g.name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+        return nome.length > 2 && normFrase.includes(nome);
+      });
+      if (metaAchada) {
+        const valor = Math.abs(lido.amountCents);
+        const ok = await confirmar({
+          titulo: `Depositar em "${metaAchada.name}"?`,
+          texto: `Entendi "${frase}" como um depósito de ${brl(valor)}. Se não é isso, cancele e lance manualmente.`,
+          ok: 'Depositar',
+        });
+        if (ok) {
+          await commit((d) => {
+            const alvo = d.goals.find((g) => g.id === metaAchada.id);
+            if (alvo) alvo.savedCents = Math.max(0, alvo.savedCents + valor);
+          });
+          toast(`${metaAchada.name}: ${brl(metaAchada.savedCents + valor)} guardado.`);
+        }
+        return;
+      }
+    }
+
     if (lido.needs.length) {
       toast(`Faltou ${lido.needs.join(' e ')} — completa aí embaixo.`);
     }
@@ -562,37 +589,6 @@ const ACOES = {
       ].sort((a, b) => (a.month < b.month ? -1 : 1));
     });
     toast('Saldos atualizados.');
-  },
-
-  async projetos() {
-    const custoProjeto = (p) => sum(
-      app.doc.transactions
-        .filter((t) => t.amountCents < 0 && p.categoryIds.includes(t.categoryId))
-        .map((t) => Math.abs(t.amountCents))
-    );
-
-    const r = await sheet(
-      `<h4>Projetos de vida</h4>
-       <p class="sub">Junta categorias pra ver o custo real de uma coisa — "quanto o carro me custa" soma combustível, seguro, manutenção e IPVA.</p>
-       ${app.doc.projects.length ? `<div class="list">${app.doc.projects.map((p) => `
-         <button class="row" data-item="${esc(p.id)}">
-           <div class="ic">${icon('carro')}</div>
-           <div class="bd"><div class="t">${esc(p.name)}</div>
-             <div class="s">${p.categoryIds.length} ${p.categoryIds.length === 1 ? 'categoria' : 'categorias'}</div></div>
-           <div class="rt"><div class="amt num">${brl(custoProjeto(p))}</div></div>
-         </button>`).join('')}</div>` : '<div class="empty">Nenhum projeto ainda.</div>'}
-       <div class="btns"><button class="btn primary" data-novo="1">${icon('mais')} Novo projeto</button>
-         <button class="btn ghost" data-x="1">Fechar</button></div>`,
-      {
-        onMount: (card, fechar) => {
-          card.querySelector('[data-x]').onclick = () => fechar(null);
-          card.querySelector('[data-novo]').onclick = () => fechar('novo');
-          card.querySelectorAll('[data-item]').forEach((b) => { b.onclick = () => fechar(b.dataset.item); });
-        },
-      }
-    );
-    if (r === 'novo') return editarProjeto(null);
-    if (r) return editarProjeto(r);
   },
 
   async perfil() {
@@ -901,6 +897,7 @@ async function editarLancamento(id, sugestao = {}) {
       { value: `cd:${c.id}`, label: `${c.name} — crédito` },
       ...(c.accountId ? [{ value: `ac:${c.accountId}`, label: `${c.name} — débito` }] : []),
     ]),
+    ...app.doc.goals.filter((g) => g.status !== 'pausado').map((g) => ({ value: `cf:${g.id}`, label: `${g.name} — depósito` })),
   ];
   const opcoesOrigemEntrada = () => app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: a.name }));
 
@@ -967,6 +964,21 @@ async function editarLancamento(id, sugestao = {}) {
 
   const entradaFinal = r.entrada === 'entrada';
   const [tipo, origemId] = r.origem.split(':');
+
+  // Depósito em cofrinho não é gasto categorizado — só move pro guardado,
+  // igual ao botão "Depositar" de dentro do cofrinho.
+  if (tipo === 'cf') {
+    const meta = app.doc.goals.find((g) => g.id === origemId);
+    if (!meta) { toast('Esse cofrinho não existe mais.'); return; }
+    if (id) { await commit((d) => { d.transactions = d.transactions.filter((t) => t.id !== id); }); }
+    await commit((d) => {
+      const alvo = d.goals.find((g) => g.id === origemId);
+      if (alvo) alvo.savedCents = Math.max(0, alvo.savedCents + Math.abs(r.valor));
+    });
+    toast(`${meta.name}: ${brl(meta.savedCents + Math.abs(r.valor))} guardado.`);
+    return;
+  }
+
   const cardId = tipo === 'cd' ? origemId : null;
   const accountId = tipo === 'ac' ? origemId : null;
   const sinal = entradaFinal ? 1 : -1;
@@ -1345,6 +1357,9 @@ async function celebrarQuitacao(dividaQuitada) {
 
 async function editarCofrinho(id) {
   const g = id ? app.doc.goals.find((x) => x.id === id) : null;
+  const categorias = app.doc.categories.filter((c) => c.id !== 'renda');
+  const jaTemCategoria = (g?.categoryIds?.length || 0) > 0;
+
   const r = await form(g ? 'Editar meta' : 'Nova meta ou cofrinho', null, [
     { name: 'name', label: 'Para quê', type: 'text', value: g?.name || '', placeholder: 'Reserva de emergência' },
     { name: 'alvo', label: 'Quanto quer juntar', type: 'money', value: g?.targetCents || 0 },
@@ -1352,7 +1367,20 @@ async function editarCofrinho(id) {
     { name: 'mensal', label: 'Guarda por mês', type: 'money', value: g?.monthlyCents || 0 },
     { name: 'prazo', label: 'Prazo (opcional)', type: 'date', value: g?.deadline || '' },
     { name: 'pausado', label: 'Pausado', type: 'checkbox', value: g?.status === 'pausado' },
-  ], { ok: 'Salvar', apagar: g ? 'Apagar' : null });
+    { name: 'porCategoria', label: 'Também acompanhar por categoria de gasto (opcional)', type: 'checkbox', value: jaTemCategoria,
+      hint: 'pra "quanto o carro me custa" — soma o que você já gasta nessas categorias, além do que guarda aqui' },
+    ...categorias.map((c) => ({ name: `cat_${c.id}`, label: c.name, type: 'checkbox', value: g?.categoryIds?.includes(c.id) || false })),
+  ], {
+    ok: 'Salvar',
+    apagar: g ? 'Apagar' : null,
+    aoMontar: (card) => {
+      const chk = card.querySelector('[name="porCategoria"]');
+      const linhasCategoria = categorias.map((c) => card.querySelector(`[name="cat_${c.id}"]`).closest('.field'));
+      const atualizar = () => { linhasCategoria.forEach((el) => { el.style.display = chk.checked ? '' : 'none'; }); };
+      chk.addEventListener('change', atualizar);
+      atualizar();
+    },
+  });
   if (!r) return;
 
   if (r.__apagar) {
@@ -1369,6 +1397,7 @@ async function editarCofrinho(id) {
     monthlyCents: r.pausado ? 0 : r.mensal,
     status: r.pausado ? 'pausado' : 'ativo',
     deadline: r.prazo || null,
+    categoryIds: r.porCategoria ? categorias.filter((c) => r[`cat_${c.id}`]).map((c) => c.id) : [],
     kind: g?.kind,
   };
   await commit((d) => {
@@ -1396,32 +1425,6 @@ async function depositarCofrinho(id) {
     if (alvo) alvo.savedCents = novoSaldo;
   });
   toast(`${g.name}: ${brl(novoSaldo)} guardado.`);
-}
-
-async function editarProjeto(id) {
-  const p = id ? app.doc.projects.find((x) => x.id === id) : null;
-  const categorias = app.doc.categories.filter((c) => c.id !== 'renda');
-
-  const r = await form(p ? 'Editar projeto' : 'Novo projeto',
-    'Marque as categorias que fazem parte desse projeto — é a soma delas que vira o custo real.',
-    [
-      { name: 'name', label: 'Nome do projeto', type: 'text', value: p?.name || '', placeholder: 'Carro' },
-      ...categorias.map((c) => ({ name: `cat_${c.id}`, label: c.name, type: 'checkbox', value: p?.categoryIds?.includes(c.id) || false })),
-    ], { ok: 'Salvar', apagar: p ? 'Apagar projeto' : null });
-  if (!r) return;
-
-  if (r.__apagar) {
-    await commit((d) => { d.projects = d.projects.filter((x) => x.id !== id); });
-    toast('Projeto apagado.');
-    return;
-  }
-
-  const categoryIds = categorias.filter((c) => r[`cat_${c.id}`]).map((c) => c.id);
-  const registro = { id: id || novoId('pj'), name: r.name || 'Projeto', categoryIds };
-  await commit((d) => {
-    d.projects = id ? d.projects.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.projects, registro];
-  });
-  toast('Salvo.');
 }
 
 async function editarBem(id) {

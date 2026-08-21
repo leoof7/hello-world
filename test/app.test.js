@@ -271,13 +271,36 @@ test('documento antigo sem versão ganha os campos novos sem perder os antigos',
   };
   const { document: novo, applied } = migrate(antigo);
 
-  assert.deepEqual(applied, [1], 'rodou a migração pendente');
+  assert.deepEqual(applied, [1, 2], 'rodou todas as migrações pendentes, em ordem');
   assert.equal(novo.version, CURRENT_VERSION);
   assert.deepEqual(novo.transactions, antigo.transactions, 'nada foi perdido');
   assert.equal(novo.profile.name, 'Leandro', 'campo antigo preservado');
   assert.equal(novo.profile.emergencyTargetMonths, 6, 'campo novo preenchido com o padrão');
   assert.deepEqual(novo.goals, [], 'coleção nova nasce vazia, não indefinida');
   assert.equal(novo.settings.debtMethod, 'avalanche');
+});
+
+test('projetos de vida viram metas sem perder as categorias que acompanhavam', async () => {
+  const { migrate } = await import('../src/data/migrations.js');
+  const antigo = {
+    version: 1,
+    projects: [{ id: 'pj-carro', name: 'Carro', categoryIds: ['combustivel', 'transporte'] }],
+    goals: [{ id: 'g-res', name: 'Reserva', targetCents: 100000, savedCents: 50000, monthlyCents: 10000, status: 'ativo' }],
+  };
+  const { document: novo, applied } = migrate(antigo);
+
+  assert.deepEqual(applied, [2]);
+  assert.equal(novo.goals.length, 2, 'a meta que já existia mais o projeto convertido');
+
+  const reserva = novo.goals.find((g) => g.id === 'g-res');
+  assert.equal(reserva.savedCents, 50000, 'meta antiga intacta');
+  assert.deepEqual(reserva.categoryIds, [], 'meta antiga ganha o campo novo vazio');
+
+  const carro = novo.goals.find((g) => g.id === 'pj-carro');
+  assert.equal(carro.name, 'Carro');
+  assert.deepEqual(carro.categoryIds, ['combustivel', 'transporte'], 'categorias preservadas');
+  assert.equal(carro.targetCents, 0, 'projeto vira meta sem valor-alvo');
+  assert.deepEqual(novo.projects, [], 'a coleção antiga fica vazia, não some');
 });
 
 test('documento já na versão atual não é mexido', async () => {

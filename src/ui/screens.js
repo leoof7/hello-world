@@ -1073,16 +1073,21 @@ function cofrinhos(app) {
 
   <div class="sec">
     <div class="sh"><h3>Seus cofrinhos</h3><a data-act="novo-cofrinho">Criar</a></div>
-    ${metas.length ? metas.map(cofrinho).join('')
+    ${metas.length ? metas.map((g) => cofrinho(g, app)).join('')
       : '<div class="empty">Nenhum cofrinho ainda.<br>Comece pela reserva de emergência.</div>'}
   </div>
   `;
 }
 
-function cofrinho(g) {
+function cofrinho(g, app) {
   const ratio = g.targetCents ? Math.min(1, g.savedCents / g.targetCents) : 0;
   const falta = Math.max(0, g.targetCents - g.savedCents);
   const meses = g.monthlyCents > 0 ? Math.ceil(falta / g.monthlyCents) : null;
+  const temCategoria = (g.categoryIds || []).length > 0;
+  const custoCategoria = temCategoria ? sum(
+    app.doc.transactions.filter((t) => t.amountCents < 0 && g.categoryIds.includes(t.categoryId)).map((t) => Math.abs(t.amountCents))
+  ) : 0;
+
   return `<div class="goal ${g.status === 'pausado' ? 'off' : ''}">
     <div class="tp">
       <div style="display:flex;gap:11px;align-items:center;min-width:0">
@@ -1097,6 +1102,8 @@ function cofrinho(g) {
       <span class="num" style="font-size:12px">${m(g.savedCents, brlShort)} de ${m(g.targetCents, brlShort)}</span>
       <span style="font-size:11px;color:var(--muted)">${g.monthlyCents ? `${m(g.monthlyCents, brlShort)}/mês` : 'parado'}</span>
     </div>
+    ${temCategoria ? `<div class="ft"><span style="font-size:10.5px;color:var(--muted)">gasto nas categorias ligadas</span>
+      <span style="font-size:10.5px;color:var(--muted)">${m(custoCategoria, brlShort)}</span></div>` : ''}
     <button class="btn ghost" data-act="depositar-cofrinho" data-id="${esc(g.id)}" style="width:100%;margin-top:10px;padding:9px">${icon('mais')} Depositar</button>
   </div>`;
 }
@@ -1132,7 +1139,7 @@ function investimentos(app) {
 
   <div class="sec">
     <div class="sh"><h3>Metas e cofrinhos</h3><a data-act="novo-cofrinho">Criar</a></div>
-    ${metas.length ? metas.map(cofrinho).join('')
+    ${metas.length ? metas.map((g) => cofrinho(g, app)).join('')
       : '<div class="empty">Nenhuma meta ainda.<br>Comece pela reserva de emergência.</div>'}
   </div>
 
@@ -1147,17 +1154,6 @@ function investimentos(app) {
       : '<div class="empty">Nenhum bem cadastrado.<br>Carro, moto, casa — o que também é seu além do que está em conta.</div>'}
   </div>
 
-  <div class="sec">
-    <div class="sh"><h3>Projetos de vida</h3></div>
-    <div class="list">
-      <button class="row" data-act="projetos">
-        <div class="ic">${icon('carro')}</div>
-        <div class="bd"><div class="t">${app.doc.projects.length} projeto${app.doc.projects.length === 1 ? '' : 's'}</div>
-          <div class="s">quanto o carro, a casa ou o pet custa de verdade, somando as categorias</div></div>
-        <span class="arr">${icon('seta')}</span>
-      </button>
-    </div>
-  </div>
   `;
 }
 

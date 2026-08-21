@@ -7,7 +7,7 @@
 // Parece detalhe de engenheiro. É o motivo pelo qual metade dos apps pequenos
 // perde os dados dos usuários na terceira atualização.
 
-export const CURRENT_VERSION = 1;
+export const CURRENT_VERSION = 2;
 
 /** Documento zerado — a forma canônica de tudo que o app guarda. */
 export function emptyDocument() {
@@ -58,6 +58,30 @@ const MIGRATIONS = {
       profile: { ...base.profile, ...(doc.profile || {}) },
       settings: { ...base.settings, ...(doc.settings || {}) },
       version: 1,
+    };
+  },
+  // 2: Projetos de vida e Cofrinhos eram duas coisas separadas que faziam a
+  // pessoa cadastrar "Carro" duas vezes — uma pra ver quanto custa, outra pra
+  // guardar dinheiro. Viram uma coisa só: toda meta pode opcionalmente somar
+  // categorias de gasto, e os projetos existentes entram como metas sem
+  // valor-alvo (só o acompanhamento de categoria que já tinham).
+  2: (doc) => {
+    const projetosComoMetas = (doc.projects || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      targetCents: 0,
+      savedCents: 0,
+      monthlyCents: 0,
+      status: 'ativo',
+      deadline: null,
+      kind: 'projeto',
+      categoryIds: p.categoryIds || [],
+    }));
+    return {
+      ...doc,
+      goals: [...(doc.goals || []).map((g) => ({ categoryIds: [], ...g })), ...projetosComoMetas],
+      projects: [],
+      version: 2,
     };
   },
 };
