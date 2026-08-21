@@ -650,6 +650,32 @@ const guia = async (page) => {
   await page.waitForTimeout(500);
   ok('e a escolha sobrevive ao recarregamento', (await leEntra()) === '••••');
 
+// Todo olho tem que mandar em alguma coisa.
+  //
+  // Dois deles nasceram decorativos: eu pus o botão no cabeçalho da lista e
+  // esqueci de ligar os valores dela no escopo. O botão acendia, apagava, e
+  // o valor continuava na tela. Botão de privacidade que não esconde nada é
+  // pior que botão nenhum — a pessoa acha que escondeu.
+  const mortos = [];
+  for (const tela of ['painel', 'cartoes', 'investimentos', 'dividas', 'recebimentos']) {
+    await page.goto(`${BASE}#${tela}`);
+    await page.waitForTimeout(420);
+    const escopos = await page.$$eval('.screen.active [data-act="privacidade-escopo"]',
+      (bs) => bs.filter((x) => x.offsetParent !== null).map((x) => x.dataset.v));
+
+    for (const e of escopos) {
+      const sel = `.screen.active [data-act="privacidade-escopo"][data-v="${e}"]`;
+      const antes = await page.evaluate(() => document.querySelector('.screen.active')?.innerText || '');
+      await page.click(sel, { timeout: 4000 }).catch(() => {});
+      await page.waitForTimeout(380);
+      const depois = await page.evaluate(() => document.querySelector('.screen.active')?.innerText || '');
+      if (antes === depois) mortos.push(`${tela}/${e}`);
+      await page.click(sel, { timeout: 4000 }).catch(() => {});
+      await page.waitForTimeout(250);
+    }
+  }
+  ok('nenhum olho de bloco é decorativo', mortos.length === 0, mortos.join(', '));
+
   ok('nenhum erro de console', true);
   await ctx.close();
 }

@@ -2514,6 +2514,10 @@ const TOUR_PASSOS = [
   { screen: 'investimentos', titulo: 'Investimentos', texto: 'Contas de investimento, cofrinhos e metas com prazo, e os bens que também contam no seu patrimônio — carro, moto, casa.' },
   { screen: 'analise', titulo: 'Saúde', texto: 'Seu diagnóstico financeiro: custo de vida mínimo, reserva de emergência, e os tetos do mês por categoria.' },
   { screen: 'tudo', titulo: 'Tudo', texto: 'Dívidas, recebimentos, gastos fixos, importar extrato do banco e fazer backup — o que não cabe nas outras abas.' },
+  // O app abre em neutro de propósito: qualquer palpite sobre a cor de quem
+  // está do outro lado erra em alguém. Em vez de adivinhar, avisa que dá para
+  // escolher — e diz onde.
+  { screen: 'tudo', titulo: 'A cor é sua', texto: 'O Zero abre em branco e areia. Em Tudo → Cor do app você troca por verde, azul, roxo, rosa, âmbar — ou escolhe a sua no seletor. Foto de perfil e tema claro/escuro ficam ao lado.', acao: 'cor' },
 ];
 
 async function tourGuiado(indice = 0) {
@@ -2532,14 +2536,23 @@ async function tourGuiado(indice = 0) {
     `<h4>${esc(passo.titulo)}</h4>
      <p class="sub">${esc(passo.texto)}</p>
      <div class="btns"><button class="btn primary" data-ok="1">${indice === TOUR_PASSOS.length - 1 ? 'Terminar' : 'Próximo'}</button>
+       ${passo.acao === 'cor' ? '<button class="btn ghost" data-cor="1">Escolher agora</button>' : ''}
        <button class="btn ghost" data-x="1">Pular tour</button></div>`,
     {
       onMount: (card, fechar) => {
         card.querySelector('[data-ok]').onclick = () => fechar('proximo');
         card.querySelector('[data-x]').onclick = () => fechar(null);
+        card.querySelector('[data-cor]')?.addEventListener('click', () => fechar('cor'));
       },
     }
   );
+
+  // "Escolher agora" abre o seletor ali mesmo e volta para o tour: avisar que
+  // dá para trocar e obrigar a procurar depois é como o aviso morre.
+  if (r === 'cor') {
+    await ACOES.cor();
+    return tourGuiado(indice + 1);
+  }
 
   if (r === 'proximo') return tourGuiado(indice + 1);
 

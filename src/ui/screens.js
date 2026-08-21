@@ -702,7 +702,7 @@ function cartoes(app) {
         <div class="ic ${a.balanceCents < 0 ? 'r' : 'j'}">${icon(a.type === 'savings' ? 'cofre' : 'banco')}</div>
         <div class="bd"><div class="t">${esc(a.name)}</div>
           <div class="s">${a.type === 'savings' ? 'Reserva' : a.type === 'cash' ? 'Dinheiro' : 'Conta corrente'}</div></div>
-        <div class="rt"><div class="amt num ${a.balanceCents < 0 ? 'neg' : ''}">${m(a.balanceCents)}</div></div>
+        <div class="rt"><div class="amt num ${a.balanceCents < 0 ? 'neg' : ''}">${mE('contas', a.balanceCents)}</div></div>
       </button>`).join('')}</div>`
       : '<div class="empty">Nenhuma conta ainda.</div>'}
   </div>
@@ -750,8 +750,8 @@ function cartoes(app) {
       <div class="row">
         <div class="ic a">${icon('lista')}</div>
         <div class="bd"><div class="t">${esc(c.description)}</div>
-          <div class="s">${c.current}/${c.of} · falta ${m(c.remainingCents, brlShort)} até ${formatShort(c.lastDueDate)}</div></div>
-        <div class="rt"><div class="amt num">${m(c.monthlyCents)}</div><div class="dt">por mês</div></div>
+          <div class="s">${c.current}/${c.of} · falta ${mE('parcelas', c.remainingCents, brlShort)} até ${formatShort(c.lastDueDate)}</div></div>
+        <div class="rt"><div class="amt num">${mE('parcelas', c.monthlyCents)}</div><div class="dt">por mês</div></div>
       </div>`).join('')}</div>
     <p class="empty" style="padding:14px 4px 0;text-align:left;font-size:11.5px">
       Antecipar parcela não economiza nada: o juro já está embutido no valor de cada uma.
@@ -1428,18 +1428,18 @@ function analise(app) {
     <div class="sh"><h3>Tetos do mês</h3>${botaoOlho("tetos")}<a data-act="tetos">Ajustar</a></div>
     ${v.orcamentoGeral ? `<div class="panel" style="margin-bottom:10px">
       <div class="ft" style="margin:0 0 8px">
-        <span style="font-size:12.5px">${m(v.orcamentoGeral.spentCents)} de ${m(v.orcamentoGeral.limitCents)}</span>
+        <span style="font-size:12.5px">${mE('tetos', v.orcamentoGeral.spentCents)} de ${mE('tetos', v.orcamentoGeral.limitCents)}</span>
         <span class="tag" style="background:var(--${v.orcamentoGeral.overPace ? 'red-soft' : 'jade-soft'});color:var(--${v.orcamentoGeral.overPace ? 'red' : 'jade'})">
           ${v.orcamentoGeral.overPace ? 'ACIMA DO RITMO' : 'NO RITMO'}</span>
       </div>
       ${barraRitmo(v.orcamentoGeral)}
       <div class="ft"><span style="font-size:10.5px;color:var(--muted)">a marca escura é onde você deveria estar hoje</span>
-        <span style="font-size:10.5px;color:var(--muted)">${m(v.orcamentoGeral.safePerDayCents)}/dia até fechar</span></div>
+        <span style="font-size:10.5px;color:var(--muted)">${mE('tetos', v.orcamentoGeral.safePerDayCents)}/dia até fechar</span></div>
     </div>` : ''}
     ${v.orcamentoVariavel.map(categoria).join('')}
   </div>` : `
   <div class="sec">
-    <div class="sh"><h3>Tetos do mês</h3>${botaoOlho("tetos")}</div>
+    <div class="sh"><h3>Tetos do mês</h3></div>
     <div class="empty">Sem teto definido.<br>Sem teto o app não consegue avisar quando o ritmo está errado.
       <div class="btns" style="justify-content:center"><button class="btn primary" data-act="tetos">Definir tetos</button></div>
     </div>
@@ -1452,7 +1452,7 @@ function analise(app) {
       <div class="row">
         <div class="ic">${icon('relogio')}</div>
         <div class="bd"><div class="t">${esc(c.name)}</div><div class="s">todo mês, o mesmo valor</div></div>
-        <div class="rt"><div class="amt num">${m(c.fixedCents, brlShort)}</div></div>
+        <div class="rt"><div class="amt num">${mE('fixos', c.fixedCents, brlShort)}</div></div>
       </div>`).join('')}</div>
   </div>` : ''}
 
@@ -1819,7 +1819,7 @@ function investimentos(app) {
         <div class="ic j">${icon('cofre')}</div>
         <div class="bd"><div class="t">${esc(a.name)}</div>
           <div class="s">${a.monthlyRate ? `rende ${percent(a.monthlyRate, 2)} ao mês` : 'sem rendimento informado'}</div></div>
-        <div class="rt"><div class="amt num">${m(a.balanceCents)}</div>
+        <div class="rt"><div class="amt num">${mE('contas', a.balanceCents)}</div>
           ${a.monthlyRate ? `<div class="dt" style="color:var(--positivo)">+${m(monthlyYield(a.balanceCents, a.monthlyRate), brlShort)}/mês</div>` : ''}</div>
       </button>`).join('')}</div>`
       : '<div class="empty">Nenhuma conta de investimento ainda.<br>Renda fixa, ações, cripto — o que você já tem investido.</div>'}

@@ -8,6 +8,12 @@
 // ilegível — e o botão ilegível costuma ser justamente o principal.
 
 export const CORES = [
+  // O padrão é o neutro: o app abre em branco e areia, sem cor escolhida por
+  // ele. Isso resolve de um jeito honesto o problema de "com que cor começar" —
+  // qualquer palpite sobre a pessoa erra em alguém, e um app de dinheiro não
+  // precisa ter opinião sobre quem você é para funcionar. O grafite quente
+  // deixa botão e link legíveis; o tour avisa que dá para trocar.
+  { id: 'neutro', nome: 'Neutro', base: '#3a3628', claro: '#2b2820', escuro: '#ddd8cc', escuro2: '#c9c3b4' },
   // O verde é o primeiro porque é o padrão, e o padrão agora é o do redesign:
   // um verde de mata, não o jade elétrico de antes. O id continua 'jade' de
   // propósito — quem já escolheu essa cor não pode ver o app trocar sozinho.
@@ -178,7 +184,7 @@ export function pintarBarraDoSistema(cor, { escuro = false, explicito = false, d
  * Aplica a cor no documento. Chamado no arranque e a cada troca.
  * `corId` é um dos presets; `corLivre` é um hex e vence o preset quando existe.
  */
-export function aplicarCor({ corId = 'jade', corLivre = null } = {}, raiz = document.documentElement) {
+export function aplicarCor({ corId = 'neutro', corLivre = null } = {}, raiz = document.documentElement) {
   const preset = CORES.find((c) => c.id === corId) || CINZA_DEFAULT;
   const hex = corLivre && hexParaRgb(corLivre) ? corLivre : preset.base;
 
