@@ -443,6 +443,17 @@ const ACOES = {
   },
 
   /**
+   * Sub-aba da Saúde. Fica na memória da sessão, não no cofre.
+   *
+   * Qual aba você olhou por último não é dado financeiro — gravar isso faria
+   * o cofre ser cifrado e regravado a cada toque numa aba.
+   */
+  'saude-aba'({ v }) {
+    app.subSaude = v || 'geral';
+    draw();
+  },
+
+  /**
    * Tira o aviso da tela — sem apagar o problema.
    *
    * Ele continua contando na campainha. Quem some com um aviso de conta

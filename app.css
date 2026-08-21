@@ -16,44 +16,53 @@
   --sh-md: 0 8px 24px rgba(0,0,0,.20), 0 2px 4px rgba(0,0,0,.10);
   --sh-lg: 0 24px 48px -12px rgba(0,0,0,.42), 0 8px 16px -8px rgba(0,0,0,.24);
 
-  /* tema claro — papel quente, não cinza frio */
-  --bg: #f4f5f7; --surface: #fff; --surface-2: #f6f7f9; --chip: #eef0f3;
-  --line: #e6e8ec; --line-2: #f0f1f4;
-  --ink: #0d1116; --ink-2: #1d232b; --muted: #727c8a; --faint: #98a1ae;
-  --jade: #0a7b5a; --jade-2: #0e9a70; --jade-soft: #e6f4ee; --on-jade: #fff;
-  --amber: #b7791f; --amber-soft: #fdf3e2;
-  --red: #c0392f; --red-soft: #fdeceb;
-  --violet: #6d55d8; --blue: #2f74c8; --steel: #7b8794; --graphite: #3a4049;
-  --hero: linear-gradient(160deg, #0d1116 0%, #181d24 55%, #212832 100%);
-  --hero-glow: rgba(14,154,112,.34);
-  --shadow-card: rgba(60,64,72,.18);
+  /* tema claro — areia, não cinza frio.
+     Estes valores vêm do redesign. Ficam aqui como o PADRÃO do app, e não
+     cravados nas telas, porque o seletor de cor continua valendo: quem trocar
+     a cor vê tudo se mover junto, e quem não trocar vê exatamente isto. */
+  --bg: #f6f5f1; --surface: #ffffff; --surface-2: #f2efe8; --chip: #efebe2;
+  --line: #ebe7dd; --line-2: #f2efe8;
+  --ink: #1b1e2a; --ink-2: #3a3628; --muted: #8b8578; --faint: #b4ae9e;
+  --jade: #4a7a5e; --jade-2: #3d6a50; --jade-soft: #eaf0ee; --on-jade: #fff;
+  --amber: #8a5a24; --amber-soft: #f4ecdd;
+  --red: #a63b32; --red-soft: #f5e4e1;
+  --violet: #6b4e93; --blue: #7c8aa0; --steel: #9a9384; --graphite: #3a3628;
+  /* Ouro é a cor de progresso: barra que enche, anel que fecha. */
+  --ouro: #c4a46a;
+  /* O herói é chapado no redesign, não degradê. O gradiente continua sendo a
+     forma do token para o aplicarCor() poder trocar por um puxado da cor. */
+  --hero: linear-gradient(160deg, #161b2e 0%, #161b2e 55%, #1c2238 100%);
+  --hero-glow: rgba(196,164,106,.20);
+  --shadow-card: rgba(40,34,20,.14);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #12151a; --surface: #191d24; --surface-2: #232833; --chip: #2b313d;
-    --line: #2b313c; --line-2: #232833;
-    --ink: #f2f4f7; --ink-2: #dfe3ea; --muted: #98a2b0; --faint: #6d7787;
-    --jade: #3ddc9a; --jade-2: #2ec288; --jade-soft: #153029; --on-jade: #08251b;
-    --amber: #f0b34a; --amber-soft: #33270f;
-    --red: #f2716a; --red-soft: #361c1c;
-    --violet: #9d8cf5; --blue: #5fa8f5; --steel: #99a3b0; --graphite: #565c66;
-    --hero: linear-gradient(160deg, #0f1216 0%, #171b21 55%, #1d222a 100%);
-    --hero-glow: rgba(61,220,154,.22);
+    --bg: #14161d; --surface: #1c1f28; --surface-2: #262a35; --chip: #2e3340;
+    --line: #2e323e; --line-2: #262a35;
+    --ink: #f2f0ea; --ink-2: #ddd8cc; --muted: #9a9384; --faint: #6f6a5e;
+    --jade: #7cb894; --jade-2: #6aa682; --jade-soft: #1b2a22; --on-jade: #0d1a13;
+    --amber: #d9a86a; --amber-soft: #33280f;
+    --red: #e08278; --red-soft: #38201d;
+    --violet: #a892d0; --blue: #9aa8bd; --steel: #8f887a; --graphite: #55503f;
+  --ouro: #c4a46a;
+    --hero: linear-gradient(160deg, #161b2e 0%, #161b2e 55%, #1c2238 100%);
+    --hero-glow: rgba(196,164,106,.18);
     --shadow-card: rgba(0,0,0,.5);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #12151a; --surface: #191d24; --surface-2: #232833; --chip: #2b313d;
-  --line: #2b313c; --line-2: #232833;
-  --ink: #f2f4f7; --ink-2: #dfe3ea; --muted: #98a2b0; --faint: #6d7787;
-  --jade: #3ddc9a; --jade-2: #2ec288; --jade-soft: #153029; --on-jade: #08251b;
-  --amber: #f0b34a; --amber-soft: #33270f;
-  --red: #f2716a; --red-soft: #361c1c;
-  --violet: #9d8cf5; --blue: #5fa8f5; --steel: #99a3b0; --graphite: #565c66;
-  --hero: linear-gradient(160deg, #0f1216 0%, #171b21 55%, #1d222a 100%);
-  --hero-glow: rgba(61,220,154,.22);
+  --bg: #14161d; --surface: #1c1f28; --surface-2: #262a35; --chip: #2e3340;
+  --line: #2e323e; --line-2: #262a35;
+  --ink: #f2f0ea; --ink-2: #ddd8cc; --muted: #9a9384; --faint: #6f6a5e;
+  --jade: #7cb894; --jade-2: #6aa682; --jade-soft: #1b2a22; --on-jade: #0d1a13;
+  --amber: #d9a86a; --amber-soft: #33280f;
+  --red: #e08278; --red-soft: #38201d;
+  --violet: #a892d0; --blue: #9aa8bd; --steel: #8f887a; --graphite: #55503f;
+  --ouro: #c4a46a;
+  --hero: linear-gradient(160deg, #161b2e 0%, #161b2e 55%, #1c2238 100%);
+  --hero-glow: rgba(196,164,106,.18);
   --shadow-card: rgba(0,0,0,.5);
 }
 
@@ -64,7 +73,7 @@ body {
   color: var(--ink);
   /* A pilha de reserva não é decoração: se a webfont não chegar, é ela que o
      app usa para sempre. -apple-system é a San Francisco do iPhone. */
-  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, sans-serif;
   letter-spacing: -.011em;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
@@ -83,8 +92,13 @@ body {
 
 .app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 
-.num { font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-.ser { font-family: 'Newsreader', 'Iowan Old Style', 'Times New Roman', Georgia, serif; font-variant-numeric: lining-nums tabular-nums; font-weight: 300; }
+/* Números.
+   O redesign usa Inter em tudo, e eu tinha levantado que coluna de dinheiro em
+   fonte proporcional dança a cada dígito. A Inter resolve isso sozinha: ela tem
+   algarismos tabulares de verdade, então `tabular-nums` alinha a coluna sem
+   precisar de uma segunda fonte. Some a monoespaçada, fica o alinhamento. */
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; letter-spacing: -.015em; }
+.ser { font-family: 'Lora', 'Iowan Old Style', 'Times New Roman', Georgia, serif; font-variant-numeric: lining-nums tabular-nums; font-weight: 500; }
 .eb { font-size: 9.5px; letter-spacing: .15em; text-transform: uppercase; font-weight: 600; }
 
 /* ---------- boot e travado ---------- */
@@ -369,7 +383,7 @@ body {
 }
 .cmini .brand { font-size: 13px; font-weight: 700; letter-spacing: .12em; }
 .cmini .type { font-size: 8.5px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.6); margin-top: 3px; }
-.cmini .n2 { font-size: 12.5px; letter-spacing: .14em; color: rgba(255,255,255,.9); font-family: 'IBM Plex Mono', monospace; }
+.cmini .n2 { font-size: 12.5px; letter-spacing: .14em; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; }
 .cmini .bot { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; }
 .cmini .hold { font-size: 8.5px; color: rgba(255,255,255,.55); letter-spacing: .09em; text-transform: uppercase; }
 .cmini .hold b { display: block; color: rgba(255,255,255,.96); font-size: 12px; font-weight: 600; margin-top: 2px; letter-spacing: 0; }
@@ -527,7 +541,7 @@ body {
 }
 /* Valor em dinheiro se lê melhor com dígitos de largura fixa. */
 .field input[data-money], .field input[data-percent] {
-  font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-variant-numeric: tabular-nums;
   font-variant-numeric: tabular-nums;
 }
 .field input:focus, .field select:focus { outline: 2px solid var(--jade); outline-offset: 1px; }
@@ -567,7 +581,7 @@ body {
 .swatch[data-swatch-value="steel"] svg { stroke: #16191d; }
 .words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0; }
 .word { background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 10px 8px; text-align: center; }
-.word .i { font-size: 9px; color: var(--faint); font-family: 'IBM Plex Mono', monospace; }
+.word .i { font-size: 9px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .word .w { font-size: 13px; font-weight: 600; margin-top: 2px; }
 
 .toast {
@@ -603,7 +617,7 @@ body {
 }
 .papo-corpo { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
 .papo-fala {
-  font-family: 'Newsreader', Georgia, serif; font-weight: 300;
+  font-family: 'Lora', Georgia, serif; font-weight: 500;
   font-size: clamp(24px, 7vw, 30px); line-height: 1.25; letter-spacing: -.01em; color: var(--ink);
   text-wrap: pretty;
 }
@@ -650,7 +664,7 @@ body {
   border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit; min-width: 0;
 }
 .papo-item-nome { flex: 1.6; }
-.papo-item-valor { flex: 1; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+.papo-item-valor { flex: 1; font-variant-numeric: tabular-nums; }
 .papo-item-x {
   width: 38px; height: 38px; flex-shrink: 0; border-radius: 50%; border: 0; cursor: pointer;
   background: var(--surface-2); color: var(--muted); display: flex; align-items: center; justify-content: center;
@@ -679,7 +693,7 @@ body {
   position: absolute; top: -3px; right: -3px; min-width: 17px; height: 17px; padding: 0 4px;
   border-radius: 100px; background: var(--red); color: #fff; border: 2px solid var(--bg);
   font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center;
-  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- gráficos ---------- */
@@ -759,3 +773,40 @@ body {
 .plano-mes .amt { font-size: 13px; font-weight: 600; }
 .plano-mes .dt { font-size: 9.5px; color: var(--faint); }
 .plano-detalhe { padding: 0 14px 14px 66px; }
+
+/* ---------- saudação ---------- */
+/* O primeiro cartão do Painel. Antes o app abria com a dívida em número
+   gigante — quem deve nove mil e abre o app todo dia para levar um susto para
+   de abrir o app. A dívida continua lá embaixo, com o mesmo peso de conta. */
+.saudacao {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 20px 22px;
+}
+.saudacao .ola { font-size: 20px; font-weight: 600; color: var(--ink); letter-spacing: -.005em; }
+.saudacao .tem { font-size: 14px; color: var(--muted); margin-top: 6px; }
+.saudacao .tem b { color: var(--ink); font-weight: 600; }
+
+/* ---------- barra de abas, versão chata ---------- */
+/* O redesign tirou a pílula flutuante: barra branca colada embaixo, borda fina
+   em cima. Menos sombra, menos raio, mais tela para o conteúdo. */
+.tabbar { background: var(--surface); border-top: 1px solid var(--line); padding: 10px 6px var(--rodape); }
+.tabbar .in { background: none; border: 0; border-radius: 0; box-shadow: none; padding: 0; }
+.tab { border-radius: 12px; gap: 4px; padding: 4px 3px; }
+.tab.on { background: none; color: var(--ink); }
+.tab.on svg { stroke-width: 1.9; }
+
+/* ---------- sub-abas ---------- */
+.subabas { display: flex; background: var(--chip); border-radius: 14px; padding: 4px; gap: 4px; margin-bottom: 4px; }
+.subaba {
+  flex: 1; text-align: center; padding: 8px 0; border-radius: 10px; border: 0; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 500; color: var(--muted); background: none;
+  transition: background .18s ease, color .18s ease;
+}
+.subaba.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--sh-sm); }
+
+/* As três sub-abas são renderizadas e o CSS mostra uma. Sai mais barato que
+   remontar a tela a cada toque, e é o mesmo que já acontece com .screen. */
+.abas .aba { display: none; }
+.abas-geral [data-aba="geral"],
+.abas-dividas [data-aba="dividas"],
+.abas-tendencia [data-aba="tendencia"] { display: block; }

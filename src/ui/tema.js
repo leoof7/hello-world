@@ -8,7 +8,11 @@
 // ilegível — e o botão ilegível costuma ser justamente o principal.
 
 export const CORES = [
-  { id: 'jade', nome: 'Verde', base: '#0a7b5a', claro: '#0e9a70', escuro: '#3ddc9a', escuro2: '#2ec288' },
+  // O verde é o primeiro porque é o padrão, e o padrão agora é o do redesign:
+  // um verde de mata, não o jade elétrico de antes. O id continua 'jade' de
+  // propósito — quem já escolheu essa cor não pode ver o app trocar sozinho.
+  { id: 'jade', nome: 'Verde', base: '#4a7a5e', claro: '#3d6a50', escuro: '#7cb894', escuro2: '#6aa682' },
+  { id: 'areia', nome: 'Areia', base: '#8a5a24', claro: '#6e4519', escuro: '#d9a86a', escuro2: '#c4a46a' },
   { id: 'azul', nome: 'Azul', base: '#1f6fd0', claro: '#2f8ae8', escuro: '#5fa8f5', escuro2: '#4b95e6' },
   { id: 'roxo', nome: 'Roxo', base: '#6d55d8', claro: '#8570e8', escuro: '#9d8cf5', escuro2: '#8b78ea' },
   { id: 'rosa', nome: 'Rosa', base: '#c2306e', claro: '#d94b87', escuro: '#f57fae', escuro2: '#e86e9d' },
@@ -95,9 +99,13 @@ export function misturar(a, b, t) {
  * isso a força é umas três vezes maior, e ainda assim o fundo continua escuro.
  */
 const TINTA = {
-  '--bg': { claro: 0.055, escuro: 0.2 },
-  '--surface': { claro: 0.022, escuro: 0.13 },
-  '--surface-2': { claro: 0.05, escuro: 0.17 },
+  // O fundo claro recebe pouquíssimo. A base agora é um areia escolhido, não
+  // um cinza neutro — tingir com força puxava o areia para o verde e ainda
+  // escurecia a tela. Quando a base já tem temperatura própria, o papel da
+  // tinta é lembrar a cor, não substituí-la.
+  '--bg': { claro: 0.022, escuro: 0.2 },
+  '--surface': { claro: 0.012, escuro: 0.13 },
+  '--surface-2': { claro: 0.035, escuro: 0.17 },
   '--chip': { claro: 0.1, escuro: 0.22 },
   '--line': { claro: 0.11, escuro: 0.24 },
   '--line-2': { claro: 0.07, escuro: 0.16 },

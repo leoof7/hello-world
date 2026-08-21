@@ -227,6 +227,15 @@ function avisoCard(a) {
   </div>`;
 }
 
+/** Bom dia, boa tarde, boa noite — e boa madrugada para quem está acordado. */
+function saudacaoDoDia(agora = new Date()) {
+  const h = agora.getHours();
+  if (h < 5) return 'Boa madrugada';
+  if (h < 12) return 'Bom dia';
+  if (h < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
 // ============================================================ PAINEL
 
 function painel(app) {
@@ -238,8 +247,8 @@ function painel(app) {
   if (v.vazio) return painelVazio(app);
 
   const hero = temDivida
-    ? `<div class="hero">
-        <div class="top"><span class="lbl">Falta para você sair</span></div>
+    ? `<div class="hero" style="margin-top:16px">
+        <div class="top"><span class="lbl">Sua dívida</span></div>
         <div class="big ser">${m(v.dividaTotalCents, brlShort)}</div>
         <div class="prog"><i style="width:${(v.progresso * 100).toFixed(0)}%"></i></div>
         <div class="foot">
@@ -273,20 +282,19 @@ function painel(app) {
       </button>`
     : '';
 
+  // A ORDEM MUDOU, e a mudança é a ideia central do redesign.
+  //
+  // Antes o app abria com a dívida em número gigante. Quem deve nove mil e
+  // abre o app todo dia para levar um susto para de abrir o app. A saudação
+  // com o saldo de agora vem primeiro; a dívida continua lá, com o mesmo peso
+  // de conta, só que depois do primeiro respiro — e sem gritar.
   return `
   ${header(app)}
-  ${hero}
-  ${guia}
-  ${backup}
 
-  ${v.avisosNaTela.length ? `<div class="sec" style="margin-top:16px">
-    ${v.avisosNaTela.map(avisoCard).join('')}
-  </div>` : ''}
-
-  <button class="ze-barra" data-act="falar">
-    <span class="ze-mic">${icon('microfone')}</span>
-    <span class="ze-txt">Fala aí, o Zé tá ouvindo</span>
-  </button>
+  <div class="saudacao">
+    <div class="ola ser">${esc(saudacaoDoDia())}${app.doc.profile?.name ? `, ${esc(app.doc.profile.name)}` : ''}</div>
+    <div class="tem">Você tem <b>${m(v.saldoCents)}</b> nas contas agora</div>
+  </div>
 
   <div class="quick">
     <button class="qa" data-act="novo"><div class="ic">${icon('mais')}</div><span>Lançar</span></button>
@@ -294,6 +302,18 @@ function painel(app) {
     <button class="qa" data-go="faturas"><div class="ic">${icon('cartao')}</div><span>Fatura</span></button>
     <button class="qa" data-go="revisao"><div class="ic">${icon('lista')}</div><span>Revisão${v.revisao.length ? ` ${v.revisao.length}` : ''}</span></button>
   </div>
+
+  <button class="ze-barra" data-act="falar">
+    <span class="ze-mic">${icon('microfone')}</span>
+    <span class="ze-txt">Fala aí, o Zé tá ouvindo</span>
+  </button>
+
+  ${guia}
+  ${backup}
+
+  ${v.avisosNaTela.length ? `<div class="sec" style="margin-top:16px">
+    ${v.avisosNaTela.map(avisoCard).join('')}
+  </div>` : ''}
 
   <div class="wrow">
     <div class="w">
@@ -311,6 +331,8 @@ function painel(app) {
   </div>
 
   ${consultor(v)}
+
+  ${hero}
 
   ${v.cartoes.length ? `
   <div class="sec">
@@ -1158,8 +1180,30 @@ function analise(app) {
     : v.guardadoCents ? `${m(v.guardadoCents, brlShort)} em poupança`
     : 'nada guardado ainda';
 
+  // Três sub-abas em vez de uma rolagem sem fim.
+  //
+  // A Saúde tinha cinco blocos empilhados e a pessoa rolava até cansar antes
+  // de achar o que queria. A divisão é por PERGUNTA — como estou, com o que
+  // já estou comprometido, para onde estou indo — e é isso que faz cada aba
+  // caber numa tela.
+  //
+  // As três são renderizadas e o CSS mostra uma. Sai mais barato que remontar
+  // a tela a cada toque, e é o mesmo que o app já faz com as abas de baixo.
+  const aba = app.subSaude || 'geral';
+  const subaba = (id, rotulo) =>
+    `<button class="subaba ${aba === id ? 'on' : ''}" data-act="saude-aba" data-v="${id}">${rotulo}</button>`;
+
   return `
   ${header(app)}
+
+  <div class="subabas">
+    ${subaba('geral', 'Geral')}
+    ${subaba('dividas', 'Compromissos')}
+    ${subaba('tendencia', 'Tendência')}
+  </div>
+
+  <div class="abas abas-${esc(aba)}">
+  <section class="aba" data-aba="geral">
 
   <div class="bloco-titulo">Hoje</div>
 
@@ -1180,6 +1224,9 @@ function analise(app) {
   </button>`}
 
   ${fechamentoMes(v)}
+
+  </section>
+  <section class="aba" data-aba="tendencia">
 
   <div class="bloco-titulo">Histórico</div>
 
@@ -1258,6 +1305,11 @@ function analise(app) {
     <i>São ${m(v.fixosSemCategoriaCents, brlShort)} por mês que ficam de fora do custo mínimo — sem categoria
        o app não sabe se é aluguel ou streaming. Toque para categorizar.</i></div>
   </button>` : ''}
+
+  </section>
+  <section class="aba" data-aba="dividas">
+
+  ${compromissos(v)}
 
   <div class="bloco-titulo">Este mês</div>
 
@@ -1372,7 +1424,49 @@ function analise(app) {
         `${percent(s.allocation.discretionaryRatio, 0)} supérfluo · ${percent(s.allocation.investedRatio, 0)} guardado.`)}
     </div>
   </div>
+
+  </section>
+  </div>
   `;
+}
+
+/**
+ * Com o que a renda já está comprometida antes de o mês começar.
+ *
+ * O que se responde aqui é diferente de "o mês fecha?": lá é sim ou não, aqui
+ * é ONDE. Fixo é o que você assinou; mínimo de dívida é o que o juro obriga;
+ * o que sobra é o único dinheiro sobre o qual você ainda decide.
+ */
+function compromissos(v) {
+  const total = Math.max(1, v.rendaFixaCents + v.extrasMesCents);
+  const livre = Math.max(0, total - v.fixosCents - v.minimosCents);
+  const faixa = (rotulo, cents, cor, forte = false) => `
+    <div style="margin-bottom:14px">
+      <div class="ft" style="margin:0">
+        <span style="font-size:13px;font-weight:500;color:var(--ink)">${esc(rotulo)}</span>
+        <b class="num" style="font-size:13.5px;color:${forte ? cor : 'var(--ink)'}">${m(cents)}</b>
+      </div>
+      ${termometro({ fracao: cents / total, cor })}
+    </div>`;
+
+  return `
+  <div class="bloco-titulo">Compromissos</div>
+
+  <div class="sec" style="margin-top:0">
+    <div class="sh"><h3>Com o que a renda já tem dono</h3><a>de ${m(total, brlShort)}</a></div>
+    <div class="panel">
+      ${faixa('Gastos fixos', v.fixosCents, 'var(--blue)')}
+      ${v.parcelasDoMesCents > 0 ? faixa('Parcelas do mês', v.parcelasDoMesCents, 'var(--amber)') : ''}
+      ${v.minimosCents > 0 ? faixa('Mínimos de dívida', v.minimosCents, 'var(--red)', true) : ''}
+      <div class="ft" style="margin:4px 0 0;padding-top:14px;border-top:1px solid var(--line)">
+        <span style="font-size:13px;font-weight:500;color:var(--ink)">Livre para guardar</span>
+        <b class="num" style="font-size:13.5px;color:var(--jade)">${m(livre)}</b>
+      </div>
+      <p style="font-size:11.5px;line-height:1.55;color:var(--muted);margin-top:10px">
+        O que vai para investimento ou cofrinho não entra como saída — guardar não é gastar.
+      </p>
+    </div>
+  </div>`;
 }
 
 const kpi = (label, valor, sub) => `<div class="w">
