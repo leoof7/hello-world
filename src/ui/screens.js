@@ -501,12 +501,34 @@ function cartoes(app) {
   </div>
 
   <div class="sec">
-    <div class="sh"><h3>Cartões</h3><a data-act="novo-cartao">Adicionar</a></div>
+    <div class="sh"><h3>Cartões de crédito</h3><a data-act="novo-cartao">Adicionar</a></div>
     ${v.cartoes.length
       ? `<div class="cscroll">${v.cartoes.map(cartaoMini).join('')}</div>
          ${v.cartoes.map((c) => faturaCartao(c, v)).join('')}`
       : '<div class="empty">Cadastre um cartão para o app saber em qual fatura cada compra cai.</div>'}
   </div>
+
+  ${v.cartoesDebito.length ? `
+  <div class="sec">
+    <div class="sh"><h3>Cartões de débito</h3><a>sai da conta na hora</a></div>
+    <div class="list">${v.cartoesDebito.map((c) => `
+      <button class="row" data-act="editar-cartao" data-id="${esc(c.id)}">
+        <div class="ic">${icon('cartao')}</div>
+        <div class="bd"><div class="t">${esc(c.name)}</div>
+          <div class="s">${pilulasDaLinha([
+            c.conta ? `debita de ${c.conta.name}` : 'sem conta — confira',
+            c.gastoNoMesCents ? `${brlShort(c.gastoNoMesCents)} este mês` : null,
+          ])}</div></div>
+        <div class="rt"><div class="amt num ${c.conta && c.conta.balanceCents < 0 ? 'neg' : ''}">${c.conta ? m(c.conta.balanceCents) : '—'}</div>
+          <div class="dt">na conta</div></div>
+      </button>`).join('')}</div>
+  </div>` : ''}
+
+  ${v.vales.length ? `
+  <div class="sec">
+    <div class="sh"><h3>Vales e benefícios</h3><a>${m(sum(v.vales.map((x) => Math.max(0, x.saldoCents))), brlShort)} disponível</a></div>
+    <div class="list">${v.vales.map(valeLinha).join('')}</div>
+  </div>` : ''}
 
   ${v.muro.some((b) => b.cents > 0) ? `
   <div class="sec">
@@ -529,6 +551,30 @@ function cartoes(app) {
     </p>
   </div>` : ''}
   `;
+}
+
+/**
+ * Uma linha de vale.
+ *
+ * O saldo é o número grande porque é o que decide se dá para almoçar fora
+ * hoje. A previsão só aparece quando aperta — dizer "dura até dia 30" quando
+ * a recarga é dia 5 é informação que ninguém usa.
+ */
+function valeLinha(x) {
+  const aperta = x.situacao === 'aperta' || x.situacao === 'acabou';
+  const quando = x.situacao === 'acabou'
+    ? 'acabou'
+    : x.situacao === 'aperta'
+      ? `no seu ritmo acaba ${formatShort(x.acabaEm)}`
+      : x.proximaRecarga ? `recarrega ${formatShort(x.proximaRecarga)}` : 'sem recarga cadastrada';
+
+  return `<button class="row" data-act="editar-cartao" data-id="${esc(x.cardId)}">
+    <div class="ic ${aperta ? 'r' : 'j'}">${icon('cartao')}</div>
+    <div class="bd"><div class="t">${esc(x.nome)}</div>
+      <div class="s">${pilulasDaLinha([quando, x.gastoCents ? `${brlShort(x.gastoCents)} usados` : null])}</div></div>
+    <div class="rt"><div class="amt num ${aperta ? 'neg' : 'pos'}">${m(Math.max(0, x.saldoCents))}</div>
+      <div class="dt">no vale</div></div>
+  </button>`;
 }
 
 function faturaCartao(c, v) {
@@ -802,6 +848,26 @@ function dividas(app) {
     <button class="btn ghost" data-act="nova-divida" style="width:100%;margin-top:8px">${icon('mais')} Cadastrar outra</button>
   </div>
 
+  ${v.dividasDesligadas.length ? `
+  <details class="sec dobra">
+    <summary>
+      <span>Pausadas</span>
+      <span class="dobra-nota">${v.dividasDesligadas.length} · ${m(sum(v.dividasDesligadas.map((d) => Math.abs(d.balanceCents))), brlShort)} fora da conta</span>
+    </summary>
+    <p class="empty" style="text-align:left;padding:10px 4px;font-size:11.5px">
+      Continuam cadastradas e não entram em nada: nem no total, nem no juro por dia,
+      nem no mínimo do mês, nem na projeção. É o lugar da dívida que está em negociação
+      ou que você contesta.
+    </p>
+    <div class="list">${v.dividasDesligadas.map((d) => `
+      <button class="row" data-act="alternar-divida" data-id="${esc(d.id)}">
+        <div class="ic">${icon('relogio')}</div>
+        <div class="bd"><div class="t">${esc(d.name)}</div>
+          <div class="s">${pilulasDaLinha(['pausada', percent(d.monthlyRate || 0, 1) + '/mês'])}</div></div>
+        <div class="rt"><div class="amt num">${m(Math.abs(d.balanceCents))}</div><div class="dt">voltar a contar</div></div>
+      </button>`).join('')}</div>
+  </details>` : ''}
+
   ${ganho && ganho.savedInterestCents > 0 ? `
   <div class="sec"><div class="say">
     <div class="k eb" style="color:var(--jade)">O que o plano vale</div>
@@ -866,6 +932,11 @@ function dividaCard(d, i, plano, v) {
     <div class="ft" style="margin:0">
       <span style="font-size:11px;color:var(--muted)">Saldo</span>
       <b class="num" style="font-size:17px">${m(Math.abs(d.balanceCents))}</b>
+    </div>
+    <div class="btns" style="margin:10px 0 0">
+      <button class="btn ghost" data-act="alternar-divida" data-id="${esc(d.id)}" style="width:100%;padding:9px;font-size:12.5px">
+        ${icon('relogio')} Pausar esta dívida
+      </button>
     </div>
     <div class="ft"><span style="font-size:11px;color:var(--muted)">Custa parada</span>
       <span class="num" style="font-size:12px;color:var(--red)">${m(Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
@@ -972,6 +1043,14 @@ function analise(app) {
     ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), origemCusto)}
     ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, esc(origemReserva))}
   </div>
+
+  ${v.fixosSemCategoria.length ? `
+  <button class="nudge" data-act="fixos" style="width:100%;text-align:left;border:0;font:inherit;margin-top:12px">
+    <span class="ic">${icon('alerta')}</span>
+    <div><b>${v.fixosSemCategoria.length} ${v.fixosSemCategoria.length === 1 ? 'gasto fixo está' : 'gastos fixos estão'} sem categoria</b>
+    <i>São ${m(v.fixosSemCategoriaCents, brlShort)} por mês que ficam de fora do custo mínimo — sem categoria
+       o app não sabe se é aluguel ou streaming. Toque para categorizar.</i></div>
+  </button>` : ''}
 
   <div class="bloco-titulo">Este mês</div>
 

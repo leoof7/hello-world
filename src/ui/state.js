@@ -7,9 +7,10 @@
 import { sum } from '../core/money.js';
 import { today, monthKey, addMonthKey, addDays } from '../core/dates.js';
 import { cycleFor, openCycle, nextCycle, dueDateOf } from '../core/statements.js';
+import { geraFatura, ehCredito, ehBeneficio, valesDe, previsaoDoBeneficio, debitosFuturos } from '../core/cards.js';
 import { byPurchase, wall, committed } from '../core/installments.js';
 import { buildEvents, daily, monthly, freeToSpend, nextIncomeDate } from '../core/projection.js';
-import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, minimumOnlyPlan, minimumsToday, minimumOf, order } from '../core/debts.js';
+import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, minimumOnlyPlan, minimumsToday, minimumOf, order, ativa, somenteAtivas } from '../core/debts.js';
 import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js';
 import { scan } from '../core/leaks.js';
 import { diagnose } from '../core/health.js';
@@ -30,7 +31,12 @@ export function derive(doc, todayISO = today()) {
   // ---- faturas ----
   const faturas = statementsOf(doc, todayISO);
   const pagas = new Set(doc.faturasPagas || []);
-  const cartoes = doc.cards.map((card) => cardView(card, doc, faturas, todayISO, pagas));
+  const todosCartoes = doc.cards.map((card) => cardView(card, doc, faturas, todayISO, pagas));
+  // `cartoes` continua sendo só o crédito porque é o que todas as telas de
+  // fatura, limite e projeção já esperavam. Débito e vale têm blocos próprios.
+  const cartoes = todosCartoes.filter((c) => ehCredito(c));
+  const cartoesDebito = todosCartoes.filter((c) => c.kind === 'debit');
+  const vales = valesDe(doc, todayISO);
 
   // ---- parcelas ----
   const parcelas = doc.transactions.filter((t) => t.installment);
@@ -39,11 +45,19 @@ export function derive(doc, todayISO = today()) {
   const comprometidoCents = committed(parcelas, todayISO);
 
   // ---- dívidas ----
-  const dividas = order(doc.debts, doc.settings?.debtMethod || PADROES.metodoDivida);
-  const dividaTotalCents = totalBalance(doc.debts);
-  const jurosDiaCents = totalDailyInterest(doc.debts);
-  const jurosMesCents = totalMonthlyInterest(doc.debts);
-  const minimosCents = minimumsToday(doc.debts);
+  // O filtro é aqui e só aqui. Dívida desligada continua no documento e
+  // continua aparecendo na tela de Dívidas — o que ela não faz é entrar em
+  // conta nenhuma. Filtrar num lugar só é o que garante isso: espalhar o
+  // `if (ativa)` por dez funções é como a regra do mínimo virou quatro cópias
+  // e uma delas ficou para trás.
+  const dividasAtivas = somenteAtivas(doc.debts);
+  const dividasDesligadas = doc.debts.filter((d) => !ativa(d));
+
+  const dividas = order(dividasAtivas, doc.settings?.debtMethod || PADROES.metodoDivida);
+  const dividaTotalCents = totalBalance(dividasAtivas);
+  const jurosDiaCents = totalDailyInterest(dividasAtivas);
+  const jurosMesCents = totalMonthlyInterest(dividasAtivas);
+  const minimosCents = minimumsToday(dividasAtivas);
 
   // ---- caixa ----
   // Investimento não é dinheiro do dia a dia — fica de fora do saldo
@@ -65,7 +79,9 @@ export function derive(doc, todayISO = today()) {
     {
       recurring: doc.recurring || [],
       statements: faturas.futuras.filter((s) => !pagas.has(`${s.cardId}|${s.cycleId}`)),
-      scheduled: minimosAgendados(doc.debts, todayISO),
+      // Débito agendado para depois de hoje ainda vai sair da conta — o saldo
+      // digitado não o contém. Vale nenhum entra aqui: ele não passa na conta.
+      scheduled: [...minimosAgendados(dividasAtivas, todayISO), ...debitosFuturos(doc, todayISO)],
     },
     todayISO,
     addDays(todayISO, PADROES.projecaoDias)
@@ -97,6 +113,14 @@ export function derive(doc, todayISO = today()) {
       .filter((r) => r.kind === 'expense' && catById[r.categoryId]?.essential)
       .map((r) => Math.abs(r.amountCents))
   );
+  // Gasto fixo sem categoria não pode entrar no custo mínimo — não dá para
+  // saber se é o aluguel ou o streaming. Mas sumir calado é pior: a pessoa
+  // cadastra R$ 1.500 de contas, o custo mínimo continua zero, e nada na tela
+  // explica. Estes ficam listados para a tela poder cobrar a categoria.
+  const fixosSemCategoria = (doc.recurring || [])
+    .filter((r) => r.kind === 'expense' && !catById[r.categoryId])
+    .map((r) => ({ id: r.id, label: r.label, amountCents: Math.abs(r.amountCents) }));
+  const fixosSemCategoriaCents = sum(fixosSemCategoria.map((r) => r.amountCents));
   const parcelasDoMesCents = muro[0]?.cents || 0;
 
   // Quanto realmente sobra. Somar só os fixos cadastrados mente para cima:
@@ -108,13 +132,13 @@ export function derive(doc, todayISO = today()) {
 
   // ---- plano de saída ----
   const orcamentoDivida = doc.settings?.debtBudgetCents ?? Math.max(0, sobraCents);
-  const plano = doc.debts.length
-    ? payoffPlan(doc.debts, orcamentoDivida, {
+  const plano = dividasAtivas.length
+    ? payoffPlan(dividasAtivas, orcamentoDivida, {
         method: doc.settings?.debtMethod || PADROES.metodoDivida,
         fromMonth: mes,
       })
     : null;
-  const planoMinimo = doc.debts.length ? minimumOnlyPlan(doc.debts, { fromMonth: mes }) : null;
+  const planoMinimo = dividasAtivas.length ? minimumOnlyPlan(dividasAtivas, { fromMonth: mes }) : null;
 
   // ---- orçamento ----
   const comTeto = categorias.map((c) => ({ ...c, limitCents: doc.budgets?.[c.id] || 0 }));
@@ -150,7 +174,10 @@ export function derive(doc, todayISO = today()) {
     transactions: doc.transactions,
     categories: categorias,
     accounts: doc.accounts,
-    debts: doc.debts,
+    // O diagnóstico de saúde também só olha as ativas: juro sobre a renda e
+    // comprometimento com uma dívida pausada dariam um retrato pior do que a
+    // realidade que a pessoa escolheu acompanhar.
+    debts: dividasAtivas,
     incomeCents: rendaFixaCents + extrasMesCents,
     savedCents: reservaCents,
     todayISO,
@@ -186,13 +213,20 @@ export function derive(doc, todayISO = today()) {
     catById,
     contaNome,
     categorias,
+    fixosSemCategoria,
+    fixosSemCategoriaCents,
     cartoes,
+    todosCartoes,
+    cartoesDebito,
+    vales,
     faturas,
     parcelas,
     compras,
     muro,
     comprometidoCents,
     dividas,
+    dividasDesligadas,
+    debts: doc.debts,
     dividaTotalCents,
     jurosDiaCents,
     jurosMesCents,
@@ -239,7 +273,7 @@ export function derive(doc, todayISO = today()) {
       .filter((t) => t.date <= todayISO)
       .sort((a, b) => (a.date < b.date ? 1 : -1))
       .slice(0, 12),
-    guia: guiaStatus(doc),
+    guia: guiaStatus(doc, { custoConhecidoCents: saude.minimumCost.cents }),
     comparativo,
     // "Esse mês fecha?" — pergunta diferente da projeção de 90 dias, que
     // responde "quando fico negativo". As faturas do mês corrente e os fixos
@@ -343,6 +377,10 @@ export function statementsOf(doc, todayISO = today()) {
     if (!t.cardId) continue;
     const card = cardById[t.cardId];
     if (!card) continue;
+    // Débito sai da conta no dia e benefício sai do saldo do vale. Nenhum dos
+    // dois vira fatura — agrupá-los aqui criaria uma cobrança futura para um
+    // dinheiro que já saiu, ou que nunca vai sair da conta.
+    if (!geraFatura(card)) continue;
     const ciclo = t.cycleId ? { id: t.cycleId } : cycleFor(card, t.date);
     const chave = `${card.id}|${ciclo.id}`;
     const g = grupos.get(chave) || {
@@ -373,6 +411,11 @@ export function statementsOf(doc, todayISO = today()) {
 
 /** A visão de um cartão: fatura aberta, próxima a vencer, limite usado. */
 function cardView(card, doc, faturas, todayISO, pagas = new Set()) {
+  // Só o crédito tem ciclo. Chamar openCycle num vale devolveria datas
+  // inventadas a partir de um closingDay que ninguém preencheu, e a tela
+  // mostraria "fecha dia 20" para um cartão que não fecha nunca.
+  if (!geraFatura(card)) return semFaturaView(card, doc, todayISO);
+
   const aberta = openCycle(card, todayISO);
   const doCartao = faturas.porCartao(card.id);
   const atual = doCartao.find((s) => s.cycleId === aberta.id);
@@ -398,6 +441,40 @@ function cardView(card, doc, faturas, todayISO, pagas = new Set()) {
     usedCents: usadoCents,
     availableCents: Math.max(0, (card.limitCents || 0) - usadoCents),
     usedRatio: card.limitCents ? Math.min(1, usadoCents / card.limitCents) : 0,
+  };
+}
+
+/**
+ * A visão de um cartão que não gera fatura.
+ *
+ * Devolve os mesmos campos que a tela espera do crédito, zerados, para nenhuma
+ * tela precisar perguntar o tipo antes de ler. O que muda é o que tem valor:
+ * o débito carrega o saldo da conta de onde sai; o benefício, o saldo do vale.
+ */
+function semFaturaView(card, doc, todayISO) {
+  const vale = ehBeneficio(card) ? previsaoDoBeneficio(card, doc.transactions || [], todayISO) : null;
+  const conta = card.accountId ? doc.accounts.find((a) => a.id === card.accountId) : null;
+
+  const gastoNoMes = (doc.transactions || [])
+    .filter((t) => t.cardId === card.id && t.amountCents < 0 && monthKey(t.date) === monthKey(todayISO))
+    .reduce((total, t) => total + Math.abs(t.amountCents), 0);
+
+  return {
+    ...card,
+    cycle: null,
+    openCents: 0,
+    openItems: [],
+    closedStatements: [],
+    nextStatement: null,
+    nextStatementPaga: false,
+    overdue: null,
+    usedCents: 0,
+    availableCents: 0,
+    usedRatio: 0,
+    // o que de fato importa neste cartão
+    vale,
+    conta: conta ? { id: conta.id, name: conta.name, balanceCents: conta.balanceCents } : null,
+    gastoNoMesCents: gastoNoMes,
   };
 }
 
@@ -430,14 +507,23 @@ function minimosAgendados(debts, todayISO) {
   return out;
 }
 
-/** Os sete passos do "Como usar" — o que já está feito e o que falta. */
-export function guiaStatus(doc) {
+/**
+ * Os sete passos do "Como usar" — o que já está feito e o que falta.
+ *
+ * `custoConhecidoCents` é o que o app JÁ calculou a partir dos gastos fixos ou
+ * do histórico. Sem ele este checklist ficava cobrando "preencha o custo de
+ * vida mínimo" de quem já tinha cadastrado aluguel, luz e internet: o passo só
+ * olhava o campo digitado à mão e ignorava a conta que o próprio app tinha
+ * acabado de fazer. Passo que cobra o que já está feito ninguém termina.
+ */
+export function guiaStatus(doc, { custoConhecidoCents = 0 } = {}) {
   const passos = [
     { id: 'cartoes', label: 'Cartões e contas', where: 'em Finanças', hint: 'fechamento, vencimento e limite de cada um', go: 'cartoes', done: doc.cards.length > 0 && doc.accounts.length > 0 },
     { id: 'dividas', label: 'Dívidas e taxas', where: 'em Dívidas', hint: 'o juro vem escrito na fatura e no extrato', go: 'dividas', done: doc.debts.length > 0 },
     { id: 'fixos', label: 'Renda e gastos fixos', where: 'em Tudo', hint: 'salário, aluguel, luz, internet, assinaturas', go: 'tudo', done: (doc.recurring || []).length >= 2 },
     { id: 'tetos', label: 'Tetos por categoria', where: 'em Saúde', hint: 'quanto pode gastar em cada coisa', go: 'analise', done: Object.keys(doc.budgets || {}).length > 0 },
-    { id: 'custo', label: 'Custo de vida mínimo', where: 'em Saúde', hint: 'só o que não dá pra cortar. É a base de tudo', go: 'analise', done: (doc.profile?.minimumCostCents || 0) > 0 },
+    { id: 'custo', label: 'Custo de vida mínimo', where: 'em Saúde', hint: 'só o que não dá pra cortar. É a base de tudo', go: 'analise',
+      done: (doc.profile?.minimumCostCents || 0) > 0 || custoConhecidoCents > 0 },
     { id: 'cofrinhos', label: 'Criar seus cofrinhos', where: 'em Investimentos', hint: 'comece só pela reserva de emergência', go: 'investimentos', done: (doc.goals || []).length > 0 },
     { id: 'backup', label: 'Primeiro backup', where: 'em Tudo', hint: 'sem servidor, o backup é você quem faz', go: 'tudo', done: !!doc.profile?.backupFeito },
   ];

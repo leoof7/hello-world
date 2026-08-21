@@ -10,7 +10,8 @@ import { monthKey, formatShort, formatMonthKey } from '../core/dates.js';
 import { parseEntry, splitEntries } from '../core/parse.js';
 import { expand } from '../core/installments.js';
 import { learn } from '../core/categorize.js';
-import { KIND, validateDebt } from '../core/debts.js';
+import { KIND as KIND_DIVIDA, validateDebt, ativa } from '../core/debts.js';
+import { KIND, TIPOS, validarCartao, permiteParcelar, ehBeneficio, ehDebito } from '../core/cards.js';
 import { podeComprar, custoDoHabito } from '../core/insights.js';
 import * as avisos from '../data/avisos.js';
 import { QUIZ } from '../core/perfil.js';
@@ -345,9 +346,15 @@ async function resolverCategoria(valor) {
   return nova.id;
 }
 
+// Usada na importação de extrato: ali qualquer origem serve, inclusive o
+// extrato do vale. O rótulo diz o tipo porque "(cartão)" num vale-refeição
+// faz a pessoa achar que escolheu errado.
 const opcoesOrigem = () => [
   ...app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: `${a.name} (conta)` })),
-  ...app.doc.cards.map((c) => ({ value: `cd:${c.id}`, label: `${c.name} (cartão)` })),
+  ...app.doc.cards.map((c) => ({
+    value: `cd:${c.id}`,
+    label: `${c.name} (${ehBeneficio(c) ? 'vale' : ehDebito(c) ? 'débito' : 'cartão'})`,
+  })),
 ];
 
 const novoId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
@@ -685,6 +692,36 @@ const ACOES = {
   // ---- dívidas ----
   async 'nova-divida'() { await editarDivida(null); },
   async 'editar-divida'({ id }) { await editarDivida(id); },
+
+  /**
+   * Pausa ou retoma uma dívida.
+   *
+   * Pausada, ela some de toda a matemática — total, juro por dia, mínimo do
+   * mês, ordem de pagar e projeção — mas continua cadastrada. Serve para a
+   * dívida em negociação, para a cobrança que a pessoa contesta, e para o
+   * caso em que a única alternativa hoje era apagar e perder o histórico.
+   */
+  async 'alternar-divida'({ id }) {
+    const d = app.doc.debts.find((x) => x.id === id);
+    if (!d) return;
+    const pausando = ativa(d);
+
+    if (pausando) {
+      const ok = await confirmar({
+        titulo: `Pausar ${d.name}?`,
+        texto: 'Ela continua cadastrada, com saldo e taxa, mas sai de todas as contas do app: '
+          + 'total da dívida, juro por dia, mínimo do mês, ordem de pagar e projeção de caixa. '
+          + 'Dá para religar a qualquer momento.',
+        ok: 'Pausar',
+      });
+      if (!ok) return;
+    }
+
+    await commit((doc) => {
+      doc.debts = doc.debts.map((x) => (x.id === id ? { ...x, active: !pausando } : x));
+    });
+    toast(pausando ? `${d.name} pausada — fora das contas.` : `${d.name} voltou a contar.`);
+  },
 
   async metodo({ v }) {
     await commit((d) => { d.settings.debtMethod = v; });
@@ -1184,12 +1221,20 @@ async function editarLancamento(id, sugestao = {}) {
   // avulsa" quando isso não faz sentido pro que está sendo lançado agora.
   // Cartão com conta vinculada é físico-único mas função dupla: crédito vai
   // pra fatura, débito desconta na hora da conta ligada a ele.
+  // Cada cartão entra do jeito que ele gasta. O de débito aponta para a conta
+  // que ele debita — quem escolhe "Débito Itaú" quer que o dinheiro saia do
+  // Itaú, não que apareça uma fatura. O vale aponta para ele mesmo, porque o
+  // dinheiro é dele.
   const opcoesOrigemSaida = () => [
-    ...app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: `${a.name} — débito` })),
-    ...app.doc.cards.flatMap((c) => [
-      { value: `cd:${c.id}`, label: `${c.name} — crédito` },
-      ...(c.accountId ? [{ value: `ac:${c.accountId}`, label: `${c.name} — débito` }] : []),
-    ]),
+    ...app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: `${a.name} — conta` })),
+    ...app.doc.cards.flatMap((c) => {
+      if (ehBeneficio(c)) return [{ value: `cd:${c.id}`, label: `${c.name} — vale` }];
+      if (ehDebito(c)) return c.accountId ? [{ value: `ac:${c.accountId}`, label: `${c.name} — débito` }] : [];
+      return [
+        { value: `cd:${c.id}`, label: `${c.name} — crédito` },
+        ...(c.accountId ? [{ value: `ac:${c.accountId}`, label: `${c.name} — débito` }] : []),
+      ];
+    }),
     ...app.doc.goals.filter((g) => g.status !== 'pausado').map((g) => ({ value: `cf:${g.id}`, label: `${g.name} — depósito` })),
   ];
   const opcoesOrigemEntrada = () => app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: a.name }));
@@ -1233,9 +1278,16 @@ async function editarLancamento(id, sugestao = {}) {
           campoOrigem.innerHTML = opcoes.map((o) =>
             `<option value="${esc(o.value)}" ${o.value === atual ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
           if (!opcoes.some((o) => o.value === atual)) campoOrigem.value = opcoes[0]?.value || '';
-          rotuloOrigem.textContent = ehEntrada ? 'Entrou onde' : 'Onde — débito ou crédito';
-          const cartaoEscolhido = !ehEntrada && campoOrigem.value.startsWith('cd:');
-          linhaParcelas.style.display = cartaoEscolhido ? '' : 'none';
+          rotuloOrigem.textContent = ehEntrada ? 'Entrou onde' : 'Onde saiu';
+
+          // Parcelar só existe no crédito. Um vale ou um débito não dividem
+          // em 12x, e oferecer o campo faria o app aceitar uma parcela que
+          // depois não teria fatura nenhuma para cair.
+          const idCartao = campoOrigem.value.startsWith('cd:') ? campoOrigem.value.slice(3) : null;
+          const cartao = idCartao ? app.doc.cards.find((c) => c.id === idCartao) : null;
+          const podeParcelar = !ehEntrada && cartao && permiteParcelar(cartao);
+          linhaParcelas.style.display = podeParcelar ? '' : 'none';
+          if (!podeParcelar) card.querySelector('[name="count"]').value = 1;
           linhaAvulsa.style.display = ehEntrada ? '' : 'none';
         };
 
@@ -1357,7 +1409,7 @@ async function editarConta(id) {
   const c = id ? app.doc.accounts.find((a) => a.id === id) : null;
   // Conta negativa costuma SER uma dívida (cheque especial) — sem isso o app
   // via um número negativo mudo e nunca contava o juro em lugar nenhum.
-  const dividaLigada = id ? app.doc.debts.find((x) => x.kind === KIND.OVERDRAFT && x.accountId === id) : null;
+  const dividaLigada = id ? app.doc.debts.find((x) => x.kind === KIND_DIVIDA.OVERDRAFT && x.accountId === id) : null;
 
   const r = await form(c ? 'Editar conta' : 'Nova conta', null, [
     { name: 'name', label: 'Nome', type: 'text', value: c?.name || '', placeholder: 'Nubank' },
@@ -1406,7 +1458,7 @@ async function editarConta(id) {
   if (r.__apagar) {
     await commit((d) => {
       d.accounts = d.accounts.filter((a) => a.id !== id);
-      d.debts = d.debts.filter((x) => !(x.kind === KIND.OVERDRAFT && x.accountId === id));
+      d.debts = d.debts.filter((x) => !(x.kind === KIND_DIVIDA.OVERDRAFT && x.accountId === id));
     });
     toast('Conta apagada.');
     return;
@@ -1424,12 +1476,12 @@ async function editarConta(id) {
   await commit((d) => {
     d.accounts = id ? d.accounts.map((a) => (a.id === id ? { ...a, ...registro } : a)) : [...d.accounts, registro];
 
-    d.debts = d.debts.filter((x) => !(x.kind === KIND.OVERDRAFT && x.accountId === registro.id));
+    d.debts = d.debts.filter((x) => !(x.kind === KIND_DIVIDA.OVERDRAFT && x.accountId === registro.id));
     if (ehChequeEspecial) {
       d.debts.push({
         id: dividaLigada?.id || novoId('dv'),
         name: `Cheque especial · ${registro.name}`,
-        kind: KIND.OVERDRAFT,
+        kind: KIND_DIVIDA.OVERDRAFT,
         accountId: registro.id,
         balanceCents: Math.abs(r.saldo),
         monthlyRate: pctParaFracao(r.taxaChequeEspecial),
@@ -1442,27 +1494,124 @@ async function editarConta(id) {
   toast(ehChequeEspecial ? 'Salvo — a dívida do cheque especial também foi atualizada.' : 'Salvo.');
 }
 
+const CORES_CARTAO = [
+  { value: 'red', label: 'Vermelho' }, { value: 'blue', label: 'Azul' },
+  { value: 'jade', label: 'Verde' }, { value: 'steel', label: 'Prata' },
+  { value: 'amber', label: 'Âmbar' }, { value: 'violet', label: 'Roxo' },
+  { value: 'graphite', label: 'Grafite' },
+];
+
+/**
+ * Que tipo de cartão é esse — a pergunta que decide todo o resto.
+ *
+ * Vem antes do formulário porque os três tipos quase não compartilham campos.
+ * Um formulário só, com nove campos e seis escondidos, faria a pessoa preencher
+ * fechamento e limite de um vale-refeição.
+ */
+function escolherTipoDeCartao() {
+  return sheet(
+    `<h4>Que cartão é esse?</h4>
+     <p class="sub">Cada tipo pergunta coisas diferentes — e o dinheiro sai de lugares diferentes.</p>
+     <div class="list">${TIPOS.map((t) => `
+       <button class="row" data-tipo="${esc(t.id)}">
+         <div class="ic">${icon('cartao')}</div>
+         <div class="bd"><div class="t">${esc(t.nome)}</div><div class="s">${esc(t.sub)}</div></div>
+         <span class="arr">${icon('seta')}</span>
+       </button>`).join('')}</div>
+     <div class="btns"><button class="btn ghost" data-x="1" style="width:100%">Cancelar</button></div>`,
+    {
+      onMount: (card, fechar) => {
+        card.querySelector('[data-x]').onclick = () => fechar(null);
+        card.querySelectorAll('[data-tipo]').forEach((b) => { b.onclick = () => fechar(b.dataset.tipo); });
+      },
+    }
+  );
+}
+
 async function editarCartao(id) {
   const c = id ? app.doc.cards.find((x) => x.id === id) : null;
-  const r = await form(c ? 'Editar cartão' : 'Novo cartão',
-    'O dia do fechamento é o que decide em qual fatura cada compra cai. Compra feita NO dia do fechamento já entra na fatura seguinte.',
-    [
-      { name: 'name', label: 'Nome', type: 'text', value: c?.name || '', placeholder: 'Nubank' },
+
+  // Trocar o tipo de um cartão que já tem lançamentos moveria compras entre
+  // faturas que existem e faturas que deixariam de existir. Enquanto está
+  // vazio, trocar é inofensivo — e é justamente quando alguém percebe que
+  // escolheu errado.
+  const temLancamento = id ? app.doc.transactions.some((t) => t.cardId === id) : false;
+  let kind = c?.kind || null;
+  if (!kind || !temLancamento) {
+    kind = (await escolherTipoDeCartao()) || kind;
+    if (!kind) return;
+  }
+
+  const salvo = await formularioDoCartao(c, kind, id);
+  if (salvo) toast('Salvo.');
+}
+
+async function formularioDoCartao(c, kind, id) {
+  const contas = app.doc.accounts.filter((a) => a.type !== 'investment');
+  const semConta = contas.length === 0;
+  const tipo = TIPOS.find((t) => t.id === kind) || TIPOS[0];
+
+  const campos = [
+    { name: 'name', label: 'Nome', type: 'text', value: c?.name || '',
+      placeholder: kind === KIND.BENEFIT ? 'Vale Alimentação' : kind === KIND.DEBIT ? 'Débito Itaú' : 'Nubank' },
+  ];
+
+  if (kind === KIND.CREDIT) {
+    campos.push(
       { name: 'closingDay', label: 'Fecha dia', type: 'number', value: c?.closingDay || 20, min: 1, max: 31 },
       { name: 'dueDay', label: 'Vence dia', type: 'number', value: c?.dueDay || 27, min: 1, max: 31 },
       { name: 'limite', label: 'Limite', type: 'money', value: c?.limitCents || 0 },
-      { name: 'color', label: 'Cor', type: 'cores', value: c?.color || 'blue',
-        options: [
-          { value: 'red', label: 'Vermelho' }, { value: 'blue', label: 'Azul' },
-          { value: 'jade', label: 'Verde' }, { value: 'steel', label: 'Prata' },
-          { value: 'amber', label: 'Âmbar' }, { value: 'violet', label: 'Roxo' },
-          { value: 'graphite', label: 'Grafite' },
-        ] },
-      { name: 'accountId', label: 'Também é débito de', type: 'select', value: c?.accountId || '',
-        options: [{ value: '', label: 'Não — só crédito' }, ...app.doc.accounts.map((a) => ({ value: a.id, label: a.name }))],
-        hint: 'se o mesmo cartão físico debita direto de uma conta, escolha ela aqui — o Lançar passa a oferecer as duas opções' },
-    ], { ok: 'Salvar', apagar: c ? 'Apagar cartão' : null });
-  if (!r) return;
+    );
+  }
+
+  if (kind === KIND.DEBIT) {
+    campos.push({
+      name: 'accountId', label: 'Debita da conta', type: 'select',
+      value: c?.accountId || (semConta ? '__nova' : contas[0]?.id || '__nova'),
+      options: [...contas.map((a) => ({ value: a.id, label: a.name })), { value: '__nova', label: '+ Cadastrar uma conta agora' }],
+      hint: 'o valor sai daqui no mesmo dia da compra — cartão de débito não tem fatura',
+    });
+    campos.push(
+      { name: 'contaNome', label: 'Nome da conta nova', type: 'text', value: '', placeholder: 'Itaú' },
+      { name: 'contaSaldo', label: 'Quanto tem nessa conta hoje', type: 'money', value: 0,
+        hint: 'pode deixar zerado. O app salva do mesmo jeito e mostra a conta negativa quando você gastar — melhor um número honesto que um chute' },
+    );
+  }
+
+  if (kind === KIND.BENEFIT) {
+    campos.push(
+      { name: 'saldo', label: 'Saldo do vale hoje', type: 'money', value: c?.balanceCents || 0,
+        hint: 'olhe no app do benefício. Daqui pra frente o Zero desconta cada compra sozinho' },
+      { name: 'recarga', label: 'A empresa deposita', type: 'money', value: c?.reloadCents || 0,
+        hint: 'deixe zerado se o depósito varia ou não é todo mês' },
+      { name: 'recargaDia', label: 'Todo dia', type: 'number', value: c?.reloadDay || 5, min: 1, max: 31 },
+    );
+  }
+
+  campos.push({ name: 'color', label: 'Cor', type: 'cores', value: c?.color || 'blue', options: CORES_CARTAO });
+
+  const r = await form(
+    c ? `Editar ${tipo.nome.toLowerCase()}` : `Novo cartão de ${tipo.nome.toLowerCase()}`,
+    subtituloDoTipo(kind),
+    campos,
+    {
+      ok: 'Salvar',
+      apagar: c ? 'Apagar cartão' : null,
+      aoMontar: (card) => {
+        if (kind !== KIND.DEBIT) return;
+        const conta = card.querySelector('[name="accountId"]');
+        const linhas = ['contaNome', 'contaSaldo']
+          .map((n) => card.querySelector(`[name="${n}"]`).closest('.field'));
+        const atualizar = () => {
+          const nova = conta.value === '__nova';
+          for (const linha of linhas) linha.style.display = nova ? '' : 'none';
+        };
+        conta.addEventListener('change', atualizar);
+        atualizar();
+      },
+    }
+  );
+  if (!r) return false;
 
   if (r.__apagar) {
     const temLancamento = app.doc.transactions.some((t) => t.cardId === id);
@@ -1472,28 +1621,68 @@ async function editarCartao(id) {
         texto: 'Apagar o cartão deixa os lançamentos sem fatura e a projeção deixa de contá-los.',
         ok: 'Apagar mesmo assim', perigo: true,
       });
-      if (!ok) return;
+      if (!ok) return false;
     }
     await commit((d) => { d.cards = d.cards.filter((x) => x.id !== id); });
     toast('Cartão apagado.');
-    return;
+    return false;
   }
 
   const dia = (n, padrao) => Math.min(31, Math.max(1, Number(n) || padrao));
+
+  // Conta nova criada aqui dentro: quem está cadastrando um cartão de débito
+  // não deveria ser mandado para outra tela e trazido de volta.
+  let contaId = kind === KIND.DEBIT ? r.accountId : null;
+  let contaNova = null;
+  if (kind === KIND.DEBIT && contaId === '__nova') {
+    contaNova = {
+      id: novoId('ac'),
+      name: r.contaNome?.trim() || r.name?.trim() || 'Conta',
+      type: 'checking',
+      balanceCents: r.contaSaldo || 0,
+      monthlyRate: 0,
+    };
+    contaId = contaNova.id;
+  }
+
   const registro = {
     id: id || novoId('cd'),
-    name: r.name || 'Cartão',
-    closingDay: dia(r.closingDay, 20),
-    dueDay: dia(r.dueDay, 27),
-    limitCents: r.limite,
+    name: r.name?.trim() || 'Cartão',
+    kind,
     color: r.color,
-    accountId: r.accountId || null,
+    closingDay: kind === KIND.CREDIT ? dia(r.closingDay, 20) : null,
+    dueDay: kind === KIND.CREDIT ? dia(r.dueDay, 27) : null,
+    limitCents: kind === KIND.CREDIT ? r.limite : 0,
+    accountId: contaId || null,
+    balanceCents: kind === KIND.BENEFIT ? r.saldo : 0,
+    // O saldo digitado vale de hoje em diante. Sem esta data, as compras que o
+    // saldo novo já reflete seriam descontadas de novo e o vale iria a zero.
+    balanceAsOf: kind === KIND.BENEFIT ? app.todayISO : null,
+    reloadCents: kind === KIND.BENEFIT ? r.recarga : 0,
+    reloadDay: kind === KIND.BENEFIT && r.recarga > 0 ? dia(r.recargaDia, 5) : null,
   };
+
+  const erros = validarCartao(registro, { accounts: [...app.doc.accounts, ...(contaNova ? [contaNova] : [])] });
+  if (erros.length) { toast(erros[0]); return false; }
+
   await commit((d) => {
+    if (contaNova) d.accounts = [...d.accounts, contaNova];
     d.cards = id ? d.cards.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.cards, registro];
   });
-  toast('Salvo.');
+
+  if (contaNova && !contaNova.balanceCents) {
+    toast(`Conta ${contaNova.name} criada zerada — atualize o saldo quando souber.`);
+    return false;
+  }
+  return true;
 }
+
+const subtituloDoTipo = (kind) =>
+  kind === KIND.CREDIT
+    ? 'O dia do fechamento é o que decide em qual fatura cada compra cai. Compra feita NO dia do fechamento já entra na fatura seguinte.'
+    : kind === KIND.DEBIT
+      ? 'Débito não tem fatura nem limite: o valor sai da conta no mesmo dia. Por isso ele precisa de uma conta.'
+      : 'O vale passa na maquininha como crédito, mas não gera fatura — desconta do próprio saldo. A compra continua indo para a categoria de verdade: mercado, restaurante, posto.';
 
 /**
  * Encolhe a imagem antes de guardar.
@@ -1542,7 +1731,7 @@ const pctParaFracao = (v) => {
 function conferirDivida(r) {
   const motivo = validateDebt({
     balanceCents: Math.abs(r.saldo || 0),
-    monthlyRate: r.kind === KIND.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
+    monthlyRate: r.kind === KIND_DIVIDA.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
     minPaymentRate: pctParaFracao(r.minimoPct),
     minPaymentCents: r.minimoFixo,
   });
@@ -1563,7 +1752,7 @@ async function editarDivida(id) {
   // coisa que faz desistir de cadastrar.
   let atual = {
     name: d0?.name || '',
-    kind: d0?.kind || KIND.REVOLVING,
+    kind: d0?.kind || KIND_DIVIDA.REVOLVING,
     saldo: Math.abs(d0?.balanceCents || 0),
     taxa: d0 ? String((d0.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
     minimoPct: d0?.minPaymentRate ? String((d0.minPaymentRate * 100).toFixed(0)) : '',
@@ -1585,10 +1774,10 @@ async function editarDivida(id) {
         { name: 'name', label: 'Nome', type: 'text', value: atual.name, placeholder: 'Fatura atrasada · Nubank' },
         { name: 'kind', label: 'Tipo', type: 'select', value: atual.kind,
           options: [
-            { value: KIND.REVOLVING, label: 'Rotativo do cartão' },
-            { value: KIND.OVERDRAFT, label: 'Cheque especial' },
-            { value: KIND.LOAN, label: 'Empréstimo' },
-            { value: KIND.INSTALLMENT, label: 'Parcelamento já contratado' },
+            { value: KIND_DIVIDA.REVOLVING, label: 'Rotativo do cartão' },
+            { value: KIND_DIVIDA.OVERDRAFT, label: 'Cheque especial' },
+            { value: KIND_DIVIDA.LOAN, label: 'Empréstimo' },
+            { value: KIND_DIVIDA.INSTALLMENT, label: 'Parcelamento já contratado' },
           ] },
         { name: 'cardId', label: 'Cartão vinculado (se for fatura atrasada)', type: 'select', value: atual.cardId,
           options: [{ value: '', label: 'Nenhum' }, ...app.doc.cards.map((c) => ({ value: c.id, label: c.name }))] },
@@ -1658,9 +1847,9 @@ async function editarDivida(id) {
     const registro = {
       id: id || novoId('dv'),
       name: r.name || 'Dívida',
-      kind: fezAcordo ? KIND.INSTALLMENT : r.kind,
+      kind: fezAcordo ? KIND_DIVIDA.INSTALLMENT : r.kind,
       balanceCents: fezAcordo ? Math.abs(r.acordoValor) : Math.abs(r.saldo),
-      monthlyRate: fezAcordo || r.kind === KIND.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
+      monthlyRate: fezAcordo || r.kind === KIND_DIVIDA.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
       minPaymentRate: fezAcordo ? 0 : pctParaFracao(r.minimoPct),
       minPaymentCents: fezAcordo ? Math.round(Math.abs(r.acordoValor) / parcelasAcordo) : r.minimoFixo,
       dueDay: Math.min(28, Math.max(1, Number(r.dueDay) || 10)),

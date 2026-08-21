@@ -19,6 +19,23 @@ export const KIND = {
 };
 
 /** Quanto essa dívida custa por dia parada. */
+/**
+ * Dívida ativa é a que continua contando.
+ *
+ * Serve para o caso em que a dívida existe no papel mas não deve mexer em
+ * nada agora: acordo em negociação, cobrança que a pessoa contesta, dívida de
+ * alguém que só está sendo acompanhada. Desligar apaga o efeito dela em toda
+ * a matemática — juros, mínimos, projeção, ordem de pagar — sem apagar o
+ * cadastro, que é o que a pessoa perde se a única saída for excluir.
+ *
+ * O padrão é ativa: `active !== false` faz toda dívida que já existe
+ * continuar valendo sem precisar de migração nenhuma.
+ */
+export const ativa = (debt) => debt?.active !== false;
+
+/** Só as que contam. Todo cálculo deste arquivo espera receber já filtrado. */
+export const somenteAtivas = (debts = []) => debts.filter(ativa);
+
 export function dailyInterest(debt) {
   if (debt.kind === KIND.INSTALLMENT) return 0;
   return Math.round(Math.abs(debt.balanceCents) * (debt.monthlyRate || 0) / 30);

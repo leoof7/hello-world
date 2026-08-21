@@ -7,7 +7,7 @@
 // Parece detalhe de engenheiro. É o motivo pelo qual metade dos apps pequenos
 // perde os dados dos usuários na terceira atualização.
 
-export const CURRENT_VERSION = 3;
+export const CURRENT_VERSION = 4;
 
 /** Documento zerado — a forma canônica de tudo que o app guarda. */
 export function emptyDocument() {
@@ -125,6 +125,22 @@ const MIGRATIONS = {
       budgets: Object.fromEntries(
         Object.entries(doc.budgets || {}).filter(([id]) => !removidas.has(id))),
       version: 3,
+    };
+  },
+
+  /**
+   * Cartão ganha tipo: crédito, débito ou benefício.
+   *
+   * Até aqui todo cartão era de crédito por definição — tinha fechamento,
+   * vencimento e fatura. Quem já cadastrou continua exatamente como estava:
+   * `kind: 'credit'` só torna explícito o que já era implícito. Nenhum campo
+   * some, porque migração não apaga.
+   */
+  4(doc) {
+    return {
+      ...doc,
+      cards: (doc.cards || []).map((c) => ({ ...c, kind: c.kind || 'credit' })),
+      version: 4,
     };
   },
 };

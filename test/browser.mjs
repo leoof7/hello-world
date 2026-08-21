@@ -407,7 +407,14 @@ const guia = async (page) => {
   await page.evaluate(() => { location.hash = '#cartoes'; });
   await page.waitForTimeout(350);
   await page.click('[data-act="novo-cartao"]');
+  // Cartão novo agora pergunta o tipo primeiro: crédito, débito ou benefício.
+  await page.waitForSelector('.sheet [data-tipo]');
+  ok('cartão novo pergunta o tipo antes de pedir os campos',
+    (await page.$$('.sheet [data-tipo]')).length === 3);
+  await page.click('.sheet [data-tipo="credit"]');
   await page.waitForSelector('.sheet #frm');
+  ok('e o de crédito pede fechamento e vencimento',
+    !!(await page.$('.sheet [name="closingDay"]')) && !!(await page.$('.sheet [name="dueDay"]')));
   await page.fill('.sheet [name="name"]', 'Meu Nubank');
   await page.click('.sheet button[type="submit"]');
   await page.waitForTimeout(600);
@@ -421,6 +428,52 @@ const guia = async (page) => {
   const depois = await documento(page);
   ok('o que você cadastrou sobrevive ao recarregamento',
     depois.cartoes === 1 && depois.demo === false);
+
+  // Vale-benefício: sem fechamento, sem limite, com saldo e recarga. Este é o
+  // tipo cujo formulário errado faria a pessoa preencher fatura de um VR.
+  await page.evaluate(() => { location.hash = '#cartoes'; });
+  await page.waitForTimeout(350);
+  await page.click('[data-act="novo-cartao"]');
+  await page.waitForSelector('.sheet [data-tipo]');
+  await page.click('.sheet [data-tipo="benefit"]');
+  await page.waitForSelector('.sheet #frm');
+  ok('o vale não pergunta fechamento nem limite',
+    !(await page.$('.sheet [name="closingDay"]')) && !(await page.$('.sheet [name="limite"]')));
+  ok('e pergunta saldo e recarga',
+    !!(await page.$('.sheet [name="saldo"]')) && !!(await page.$('.sheet [name="recarga"]')));
+  await page.fill('.sheet [name="name"]', 'Vale Alimentação');
+  await page.fill('.sheet [name="saldo"]', '800,00');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(600);
+
+  ok('o vale aparece no bloco de vales, com saldo',
+    await page.evaluate(() => document.body.innerText.includes('Vales e benefícios')));
+
+  // Débito: exige conta, e o formulário oferece criar uma na hora.
+  await page.click('[data-act="novo-cartao"]');
+  await page.waitForSelector('.sheet [data-tipo]');
+  await page.click('.sheet [data-tipo="debit"]');
+  await page.waitForSelector('.sheet #frm');
+  ok('o débito não pergunta fechamento nem limite',
+    !(await page.$('.sheet [name="closingDay"]')) && !(await page.$('.sheet [name="limite"]')));
+  ok('e oferece cadastrar a conta ali mesmo', await page.evaluate(() =>
+    [...document.querySelectorAll('.sheet [name="accountId"] option')].some((o) => o.value === '__nova')));
+  await page.click('.sheet [data-x]');
+  await page.waitForTimeout(200);
+
+  // O ponto do desenho: o vale não pode virar fatura nem sair da conta.
+  const vale = await page.evaluate(async () => {
+    const { app } = await import('./src/ui/app.js');
+    const v = app.view;
+    return {
+      vales: v.vales.length,
+      credito: v.cartoes.length,
+      faturasDeVale: v.faturas.todas.filter((f) => /Vale/.test(f.cardName || '')).length,
+    };
+  });
+  ok('o vale entra na lista de vales, não na de crédito',
+    vale.vales === 1 && vale.credito === 1, JSON.stringify(vale));
+  ok('e não gerou fatura nenhuma', vale.faturasDeVale === 0, JSON.stringify(vale));
 
   // Lançar sem conta nem cartão não pode estourar: tem de explicar e oferecer o passo.
   // Uma dívida cadastrada basta para o Painel sair do estado vazio sem criar origem.
@@ -577,6 +630,8 @@ const guia = async (page) => {
   await page.evaluate(() => { location.hash = '#cartoes'; });
   await page.waitForTimeout(350);
   await page.click('[data-act="novo-cartao"]');
+  await page.waitForSelector('.sheet [data-tipo]');
+  await page.click('.sheet [data-tipo="credit"]');
   await page.waitForSelector('.sheet #frm');
   await page.fill('.sheet [name="name"]', 'Teste');
   await page.fill('.sheet [name="closingDay"]', '99');

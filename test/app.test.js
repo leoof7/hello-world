@@ -271,13 +271,31 @@ test('documento antigo sem versão ganha os campos novos sem perder os antigos',
   };
   const { document: novo, applied } = migrate(antigo);
 
-  assert.deepEqual(applied, [1, 2, 3], 'rodou todas as migrações pendentes, em ordem');
+  assert.deepEqual(applied, [1, 2, 3, 4], 'rodou todas as migrações pendentes, em ordem');
   assert.equal(novo.version, CURRENT_VERSION);
   assert.deepEqual(novo.transactions, antigo.transactions, 'nada foi perdido');
   assert.equal(novo.profile.name, 'Leandro', 'campo antigo preservado');
   assert.equal(novo.profile.emergencyTargetMonths, 6, 'campo novo preenchido com o padrão');
   assert.deepEqual(novo.goals, [], 'coleção nova nasce vazia, não indefinida');
   assert.equal(novo.settings.debtMethod, 'avalanche');
+
+  const cartao = novo.cards.find((c) => c.id === 'nu');
+  assert.equal(cartao.kind, 'credit', 'cartão de antes já era de crédito — agora está escrito');
+  assert.equal(cartao.closingDay, 20, 'e continua com tudo que tinha');
+  assert.equal(cartao.dueDay, 27);
+});
+
+test('quem já tinha tipo no cartão não é sobrescrito pela migração', async () => {
+  const { migrate } = await import('../src/data/migrations.js');
+  const { document: novo } = migrate({
+    version: 3,
+    cards: [
+      { id: 'va', name: 'VA', kind: 'benefit', balanceCents: 50000 },
+      { id: 'db', name: 'Débito', kind: 'debit', accountId: 'c1' },
+    ],
+  });
+  assert.equal(novo.cards.find((c) => c.id === 'va').kind, 'benefit');
+  assert.equal(novo.cards.find((c) => c.id === 'db').kind, 'debit');
 });
 
 test('projetos de vida viram metas sem perder as categorias que acompanhavam', async () => {
@@ -289,7 +307,7 @@ test('projetos de vida viram metas sem perder as categorias que acompanhavam', a
   };
   const { document: novo, applied } = migrate(antigo);
 
-  assert.deepEqual(applied, [2, 3]);
+  assert.deepEqual(applied, [2, 3, 4]);
   assert.equal(novo.goals.length, 2, 'a meta que já existia mais o projeto convertido');
 
   const reserva = novo.goals.find((g) => g.id === 'g-res');
