@@ -27,22 +27,34 @@ export function minimumCostOfLiving(transactions, categories, todayISO, { months
   }
 
   const valores = [...porMes.values()];
-  // Sem histórico ainda, o app não pode inventar "R$ 0". Prefere somar os
-  // gastos fixos essenciais já cadastrados (moradia, contas) — isso já existe
-  // no app e atualiza sozinho quando a pessoa cadastra um gasto fixo. Só cai
-  // pro número digitado no Perfil se não houver nem isso.
-  if (!valores.length) {
-    if (fixedEssentialCents > 0) return { cents: fixedEssentialCents, months: 0, confident: false, source: 'fixos' };
-    return manualCents > 0
-      ? { cents: manualCents, months: 0, confident: false, source: 'manual' }
-      : { cents: 0, months: 0, confident: false, source: 'histórico' };
+  const media = valores.length ? Math.round(sum(valores) / valores.length) : 0;
+
+  // O que você JÁ SABE que sai todo mês é piso, não plano B.
+  //
+  // Antes o histórico vencia sempre que existisse — e bastava um lançamento
+  // solto de R$ 100 numa categoria essencial para o app abandonar os R$ 1.170
+  // de aluguel e contas já cadastrados e anunciar que seu custo de vida mínimo
+  // era R$ 100. Ninguém vive por menos que o próprio aluguel: o piso vale
+  // mesmo quando há histórico, porque histórico curto mente para baixo.
+  const piso = Math.max(fixedEssentialCents, manualCents);
+
+  if (media >= piso && valores.length) {
+    return {
+      cents: media,
+      months: valores.length,
+      confident: valores.length >= 3,
+      source: 'histórico',
+      byMonth: [...porMes.entries()].sort(),
+    };
   }
 
+  if (piso <= 0) return { cents: 0, months: 0, confident: false, source: 'histórico' };
+
   return {
-    cents: Math.round(sum(valores) / valores.length),
+    cents: piso,
     months: valores.length,
-    confident: valores.length >= 3,
-    source: 'histórico',
+    confident: false,
+    source: fixedEssentialCents >= manualCents ? 'fixos' : 'manual',
     byMonth: [...porMes.entries()].sort(),
   };
 }

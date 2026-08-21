@@ -151,6 +151,13 @@ body {
 .nudge i { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
 
 /* ---------- ações rápidas ---------- */
+/* Separa os horizontes: o que é foto de hoje, o que é previsão, o que é
+   passado. Empilhados sem aviso, os três viravam a mesma sopa de números. */
+.bloco-titulo {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); margin: 26px 0 10px; padding: 0 2px;
+}
+
 /* ---------- pílulas de categoria ---------- */
 .pilulas { display: flex; flex-wrap: wrap; gap: 7px; }
 .pilula {

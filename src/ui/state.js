@@ -47,6 +47,12 @@ export function derive(doc, todayISO = today()) {
   // disponível e da reserva, com número próprio na aba Investimentos.
   const saldoCents = sum(doc.accounts.filter((a) => a.type !== 'savings' && a.type !== 'investment').map((a) => a.balanceCents));
   const guardadoCents = sum(doc.accounts.filter((a) => a.type === 'savings').map((a) => a.balanceCents));
+  // Reserva de emergência é dinheiro que você alcança num aperto. O que está
+  // nos cofrinhos conta: perguntar "quantos meses de reserva você tem?" e
+  // ignorar o cofrinho chamado "Reserva de emergência" era responder zero
+  // olhando para o dinheiro separado exatamente para isso.
+  const emCofrinhosCents = sum((doc.goals || []).map((g) => Math.max(0, g.savedCents || 0)));
+  const reservaCents = guardadoCents + emCofrinhosCents;
   const investidoCents = sum(doc.accounts.filter((a) => a.type === 'investment').map((a) => a.balanceCents));
 
   // Fatura marcada como paga já saiu do bolso — não é mais saída futura,
@@ -140,7 +146,7 @@ export function derive(doc, todayISO = today()) {
     accounts: doc.accounts,
     debts: doc.debts,
     incomeCents: rendaFixaCents + extrasMesCents,
-    savedCents: guardadoCents,
+    savedCents: reservaCents,
     todayISO,
     minimumCostManualCents: doc.profile?.minimumCostCents || 0,
     minimumCostFixedCents: fixosEssenciaisCents,
@@ -188,6 +194,8 @@ export function derive(doc, todayISO = today()) {
     progresso,
     saldoCents,
     guardadoCents,
+    emCofrinhosCents,
+    reservaCents,
     investidoCents,
     eventos,
     projecao,

@@ -1129,6 +1129,9 @@ async function editarConta(id) {
         { value: 'investment', label: 'Investimento' },
       ] },
     { name: 'saldo', label: 'Saldo hoje', type: 'money', value: Math.abs(c?.balanceCents || 0) },
+    { name: 'rende', label: 'Rende ao mês (%)', type: 'percent',
+      value: c?.monthlyRate ? String((c.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
+      hint: 'só o número, ao MÊS. Poupança fica perto de 0,5; CDB de 100% do CDI, perto de 1. Deixe vazio se não rende' },
     { name: 'negativo', label: 'Está negativo', type: 'checkbox', value: (c?.balanceCents || 0) < 0 },
     { name: 'chequeEspecial', label: 'É cheque especial (cobra juro)', type: 'checkbox', value: !!dividaLigada },
     { name: 'taxaChequeEspecial', label: 'Juros ao mês (%)', type: 'percent',
@@ -1142,10 +1145,17 @@ async function editarConta(id) {
       const cheque = card.querySelector('[name="chequeEspecial"]');
       const linhaCheque = cheque.closest('.field');
       const linhaTaxa = card.querySelector('[name="taxaChequeEspecial"]').closest('.field');
+      const tipo = card.querySelector('[name="type"]');
+      const linhaRende = card.querySelector('[name="rende"]').closest('.field');
       const atualizar = () => {
         linhaCheque.style.display = negativo.checked ? '' : 'none';
         linhaTaxa.style.display = negativo.checked && cheque.checked ? '' : 'none';
+        // Conta corrente não rende — perguntar ali só faz a pessoa duvidar
+        // se deveria estar preenchendo alguma coisa.
+        const podeRender = tipo.value === 'investment' || tipo.value === 'savings';
+        linhaRende.style.display = podeRender && !negativo.checked ? '' : 'none';
       };
+      tipo.addEventListener('change', atualizar);
       negativo.addEventListener('change', atualizar);
       cheque.addEventListener('change', atualizar);
       atualizar();
@@ -1167,6 +1177,7 @@ async function editarConta(id) {
     name: r.name || 'Conta',
     type: r.type,
     balanceCents: (r.negativo ? -1 : 1) * Math.abs(r.saldo),
+    monthlyRate: pctParaFracao(r.rende),
   };
   const ehChequeEspecial = r.negativo && r.chequeEspecial;
 
@@ -1429,6 +1440,9 @@ async function editarCofrinho(id) {
     { name: 'alvo', label: 'Quanto quer juntar', type: 'money', value: g?.targetCents || 0 },
     { name: 'guardado', label: 'Já tem', type: 'money', value: g?.savedCents || 0 },
     { name: 'mensal', label: 'Guarda por mês', type: 'money', value: g?.monthlyCents || 0 },
+    { name: 'rende', label: 'Rende ao mês (%)', type: 'percent',
+      value: g?.monthlyRate ? String((g.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
+      hint: 'se o dinheiro está num lugar que rende, a meta chega antes. Só o número, ao MÊS' },
     { name: 'prazo', label: 'Prazo (opcional)', type: 'date', value: g?.deadline || '' },
     { name: 'pausado', label: 'Pausado', type: 'checkbox', value: g?.status === 'pausado' },
     { name: 'porCategoria', label: 'Também acompanhar por categoria de gasto (opcional)', type: 'checkbox', value: jaTemCategoria,
@@ -1459,6 +1473,7 @@ async function editarCofrinho(id) {
     targetCents: r.alvo,
     savedCents: r.guardado,
     monthlyCents: r.pausado ? 0 : r.mensal,
+    monthlyRate: pctParaFracao(r.rende),
     status: r.pausado ? 'pausado' : 'ativo',
     deadline: r.prazo || null,
     categoryIds: r.porCategoria ? categorias.filter((c) => r[`cat_${c.id}`]).map((c) => c.id) : [],

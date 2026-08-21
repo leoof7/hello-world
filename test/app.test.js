@@ -449,3 +449,58 @@ test('o exemplo não aponta para categoria que não existe', async () => {
 
   assert.deepEqual([...orfas], [], 'categoria órfã no exemplo vira "sem categoria" na tela, calada');
 });
+
+// ------------------------------------------- custo mínimo e reserva conversam
+//
+// Os dois apareceram errados na tela ao mesmo tempo: custo mínimo de R$ 100 com
+// R$ 1.170 de aluguel e contas cadastrados, e "0,0 meses de reserva" com o
+// cofrinho da reserva cheio. Eram a mesma família de erro — parte do app
+// ignorando o que a outra parte já sabia.
+
+test('custo de vida mínimo nunca fica abaixo dos gastos fixos essenciais', () => {
+  const doc = emptyDocument();
+  doc.categories = [{ id: 'moradia', name: 'Moradia', essential: true, fixed: true }];
+  doc.recurring = [{ id: 'r1', label: 'Aluguel', kind: 'expense', categoryId: 'moradia', amountCents: 90000, dayOfMonth: 10 }];
+  // um único lançamento magro no mês passado — não pode vencer o aluguel
+  doc.transactions = [{ id: 't1', date: '2026-07-15', competence: '2026-07', amountCents: -10000, categoryId: 'moradia' }];
+
+  const v = derive(doc, HOJE);
+  assert.equal(v.saude.minimumCost.cents, 90000, 'ninguém vive por menos que o próprio aluguel');
+  assert.equal(v.saude.minimumCost.source, 'fixos');
+});
+
+test('histórico gordo continua vencendo o piso', () => {
+  const doc = emptyDocument();
+  doc.categories = [{ id: 'moradia', name: 'Moradia', essential: true, fixed: true }];
+  doc.recurring = [{ id: 'r1', label: 'Aluguel', kind: 'expense', categoryId: 'moradia', amountCents: 90000, dayOfMonth: 10 }];
+  doc.transactions = ['2026-05', '2026-06', '2026-07'].map((m, i) => ({
+    id: `t${i}`, date: `${m}-15`, competence: m, amountCents: -150000, categoryId: 'moradia',
+  }));
+
+  const v = derive(doc, HOJE);
+  assert.equal(v.saude.minimumCost.cents, 150000, 'com histórico real, ele manda');
+  assert.equal(v.saude.minimumCost.source, 'histórico');
+  assert.equal(v.saude.minimumCost.confident, true);
+});
+
+test('o guardado nos cofrinhos conta como reserva de emergência', () => {
+  const doc = emptyDocument();
+  doc.categories = [{ id: 'moradia', name: 'Moradia', essential: true, fixed: true }];
+  doc.recurring = [{ id: 'r1', label: 'Aluguel', kind: 'expense', categoryId: 'moradia', amountCents: 100000, dayOfMonth: 10 }];
+  doc.goals = [{ id: 'g1', name: 'Reserva de emergência', kind: 'reserva', targetCents: 600000, savedCents: 300000, monthlyCents: 0, status: 'ativo' }];
+
+  const v = derive(doc, HOJE);
+  assert.equal(v.reservaCents, 300000, 'o cofrinho entra na conta');
+  assert.equal(v.saude.emergency.months, 3, 'R$ 3.000 com custo de R$ 1.000 são três meses');
+});
+
+test('poupança e cofrinho somam, sem contar duas vezes', () => {
+  const doc = emptyDocument();
+  doc.accounts = [{ id: 'ac', name: 'Poupança', type: 'savings', balanceCents: 200000 }];
+  doc.goals = [{ id: 'g1', name: 'Viagem', targetCents: 500000, savedCents: 100000, monthlyCents: 0, status: 'ativo' }];
+
+  const v = derive(doc, HOJE);
+  assert.equal(v.guardadoCents, 200000);
+  assert.equal(v.emCofrinhosCents, 100000);
+  assert.equal(v.reservaCents, 300000);
+});

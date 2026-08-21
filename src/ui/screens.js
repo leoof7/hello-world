@@ -7,6 +7,7 @@
 import { brl, brlShort, formatCents, percent, sum } from '../core/money.js';
 import { formatShort, formatLong, formatMonthKey, monthAbbr, addMonthKey, parts, daysBetween } from '../core/dates.js';
 import { KIND, horizon, comparePlans } from '../core/debts.js';
+import { monthsToGoal, monthlyYield } from '../core/goals.js';
 import { backupMessage } from '../data/backup.js';
 import { esc, icon, sparkline } from './dom.js';
 import { wire } from './actions.js';
@@ -811,24 +812,58 @@ function analise(app) {
   const v = app.view;
   const s = v.saude;
 
+  // De onde saiu o custo mínimo — número sem origem é número em que não se
+  // confia, e este já apareceu como "R$ 100" sem explicar nada.
+  const origemCusto = s.minimumCost.confident
+    ? `média de ${s.minimumCost.months} meses seus`
+    : s.minimumCost.source === 'fixos' ? 'soma dos seus gastos fixos essenciais'
+    : s.minimumCost.source === 'manual' ? 'o valor que você digitou no perfil'
+    : 'ainda sem dado suficiente';
+
+  const origemReserva = v.emCofrinhosCents && v.guardadoCents
+    ? `${m(v.guardadoCents, brlShort)} em poupança + ${m(v.emCofrinhosCents, brlShort)} em cofrinhos`
+    : v.emCofrinhosCents ? `${m(v.emCofrinhosCents, brlShort)} guardado nos cofrinhos`
+    : v.guardadoCents ? `${m(v.guardadoCents, brlShort)} em poupança`
+    : 'nada guardado ainda';
+
   return `
   ${header(app)}
 
+  <div class="bloco-titulo">Hoje</div>
+
+  <div class="wrow">
+    ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), origemCusto)}
+    ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, `alvo ${s.emergency.targetMonths} meses`)}
+  </div>
+
+  <div class="sec" style="margin-top:10px">
+    <div class="panel" style="padding:14px">
+      <div class="ft" style="margin:0 0 6px">
+        <span style="font-size:11px;color:var(--muted)">Custo mínimo</span>
+        <span style="font-size:11px;color:var(--muted)">${esc(origemCusto)}</span>
+      </div>
+      <div class="ft" style="margin:0">
+        <span style="font-size:11px;color:var(--muted)">Reserva</span>
+        <span style="font-size:11px;color:var(--muted)">${esc(origemReserva)}</span>
+      </div>
+      ${s.emergency.missingCents > 0 ? `<div class="ft" style="margin:8px 0 0;padding-top:8px;border-top:1px solid var(--line-2)">
+        <span style="font-size:11px;color:var(--muted)">Falta para ${s.emergency.targetMonths} meses</span>
+        <span class="num" style="font-size:12px">${m(s.emergency.missingCents, brlShort)}</span>
+      </div>` : ''}
+    </div>
+  </div>
+
+  <div class="bloco-titulo">Próximos 90 dias</div>
+
   <div class="sec" style="margin-top:0">
-    <div class="sh"><h3>Caixa nos próximos 90 dias</h3>
+    <div class="sh"><h3>Caixa</h3>
       <a class="${v.projecao.firstNegative ? 'warn' : ''}">${v.projecao.firstNegative ? `negativo ${formatShort(v.projecao.firstNegative.date)}` : 'sem furo'}</a></div>
     <div class="panel">${curvaCaixa(v.projecao)}</div>
   </div>
 
-  <div class="wrow">
-    ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), s.minimumCost.confident
-      ? `média de ${s.minimumCost.months} meses`
-      : s.minimumCost.source === 'fixos' ? 'dos seus gastos fixos'
-      : s.minimumCost.source === 'manual' ? 'do que você digitou' : 'ainda estimando')}
-    ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, `alvo ${s.emergency.targetMonths} meses`)}
-  </div>
+  <div class="bloco-titulo">Histórico</div>
 
-  <div class="sec">
+  <div class="sec" style="margin-top:0">
     <div class="sh"><h3>Calendário do mês</h3>
       ${v.piorDiaMes ? `<a class="warn">pior dia ${v.piorDiaMes.day} · ${m(Math.abs(v.piorDiaMes.cents), brlShort)}</a>` : ''}</div>
     <div class="panel">${calendarioMes(v)}</div>
@@ -838,6 +873,8 @@ function analise(app) {
     <div class="sh"><h3>Tendência mensal</h3><a>gasto total por mês</a></div>
     <div class="panel">${historicoBarras(v.historicoMensal)}</div>
   </div>
+
+  <div class="bloco-titulo">Este mês</div>
 
   ${v.orcamentoVariavel.length ? `
   <div class="sec">
@@ -1091,8 +1128,15 @@ function cofrinhos(app) {
 
 function cofrinho(g, app) {
   const ratio = g.targetCents ? Math.min(1, g.savedCents / g.targetCents) : 0;
-  const falta = Math.max(0, g.targetCents - g.savedCents);
-  const meses = g.monthlyCents > 0 ? Math.ceil(falta / g.monthlyCents) : null;
+  // O prazo considera o rendimento: dinheiro guardado num lugar que rende
+  // chega antes, e fingir que não rende empurra a data para pior do que é.
+  const meses = monthsToGoal({
+    savedCents: g.savedCents,
+    monthlyCents: g.monthlyCents,
+    targetCents: g.targetCents,
+    monthlyRate: g.monthlyRate || 0,
+  });
+  const rendeMes = monthlyYield(g.savedCents, g.monthlyRate || 0);
   const temCategoria = (g.categoryIds || []).length > 0;
   const custoCategoria = temCategoria ? sum(
     app.doc.transactions.filter((t) => t.amountCents < 0 && g.categoryIds.includes(t.categoryId)).map((t) => Math.abs(t.amountCents))
@@ -1112,6 +1156,8 @@ function cofrinho(g, app) {
       <span class="num" style="font-size:12px">${m(g.savedCents, brlShort)} de ${m(g.targetCents, brlShort)}</span>
       <span style="font-size:11px;color:var(--muted)">${g.monthlyCents ? `${m(g.monthlyCents, brlShort)}/mês` : 'parado'}</span>
     </div>
+    ${rendeMes > 0 ? `<div class="ft"><span style="font-size:10.5px;color:var(--muted)">rende ${percent(g.monthlyRate, 2)} ao mês</span>
+      <span style="font-size:10.5px;color:var(--jade)">+${m(rendeMes, brlShort)}/mês</span></div>` : ''}
     ${temCategoria ? `<div class="ft"><span style="font-size:10.5px;color:var(--muted)">gasto nas categorias ligadas</span>
       <span style="font-size:10.5px;color:var(--muted)">${m(custoCategoria, brlShort)}</span></div>` : ''}
     <button class="btn ghost" data-act="depositar-cofrinho" data-id="${esc(g.id)}" style="width:100%;margin-top:10px;padding:9px">${icon('mais')} Depositar</button>
@@ -1141,8 +1187,10 @@ function investimentos(app) {
     ${contasInv.length ? `<div class="list">${contasInv.map((a) => `
       <button class="row" data-act="editar-conta" data-id="${esc(a.id)}">
         <div class="ic j">${icon('cofre')}</div>
-        <div class="bd"><div class="t">${esc(a.name)}</div><div class="s">investimento</div></div>
-        <div class="rt"><div class="amt num">${m(a.balanceCents)}</div></div>
+        <div class="bd"><div class="t">${esc(a.name)}</div>
+          <div class="s">${a.monthlyRate ? `rende ${percent(a.monthlyRate, 2)} ao mês` : 'sem rendimento informado'}</div></div>
+        <div class="rt"><div class="amt num">${m(a.balanceCents)}</div>
+          ${a.monthlyRate ? `<div class="dt" style="color:var(--jade)">+${m(monthlyYield(a.balanceCents, a.monthlyRate), brlShort)}/mês</div>` : ''}</div>
       </button>`).join('')}</div>`
       : '<div class="empty">Nenhuma conta de investimento ainda.<br>Renda fixa, ações, cripto — o que você já tem investido.</div>'}
   </div>
