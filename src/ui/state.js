@@ -131,6 +131,32 @@ export function derive(doc, todayISO = today()) {
     .filter((r) => r.kind === 'expense' && !catById[r.categoryId])
     .map((r) => ({ id: r.id, label: r.label, amountCents: mensalDoRecorrente(r) }));
   const fixosSemCategoriaCents = sum(fixosSemCategoria.map((r) => r.amountCents));
+
+  /**
+   * A conta do custo mínimo, aberta.
+   *
+   * O número sozinho não dá para conferir: só entra gasto fixo de categoria
+   * marcada como essencial, e ninguém sabe de cabeça quais são. Quem tem plano
+   * de saúde ou escola como fixo vê um custo mínimo menor do que a própria vida
+   * custa e não descobre por quê.
+   *
+   * Aqui as duas listas saem separadas — o que entra e o que fica de fora, com
+   * o motivo. É a diferença entre um número para acreditar e um número para
+   * conferir.
+   */
+  const fixosDoCusto = { dentro: [], fora: [] };
+  for (const r of (doc.recurring || []).filter((x) => x.kind === 'expense')) {
+    const cat = catById[r.categoryId];
+    const item = {
+      id: r.id,
+      label: r.label,
+      amountCents: mensalDoRecorrente(r),
+      categoria: cat?.name || null,
+    };
+    if (cat?.essential) fixosDoCusto.dentro.push(item);
+    else fixosDoCusto.fora.push({ ...item, motivo: cat ? `${cat.name} não é essencial` : 'sem categoria' });
+  }
+  const fixosForaDoCustoCents = sum(fixosDoCusto.fora.map((r) => r.amountCents));
   const parcelasDoMesCents = muro[0]?.cents || 0;
 
   // Quanto realmente sobra. Somar só os fixos cadastrados mente para cima:
@@ -235,6 +261,8 @@ export function derive(doc, todayISO = today()) {
     categorias,
     fixosSemCategoria,
     fixosSemCategoriaCents,
+    fixosDoCusto,
+    fixosForaDoCustoCents,
     cartoes,
     todosCartoes,
     cartoesDebito,

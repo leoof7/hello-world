@@ -449,6 +449,79 @@ function terceiroDestaque(app, v) {
   </div></div>`;
 }
 
+/**
+ * A conta do custo mínimo, aberta para conferência.
+ *
+ * O número sozinho não dá para checar. Só entra gasto fixo de categoria
+ * marcada como essencial — Moradia, Contas da casa, Mercado, Combustível, Pet
+ * — e ninguém sabe essa lista de cabeça. Quem tem plano de saúde ou escola
+ * como fixo vê um custo mínimo menor do que a própria vida custa e não
+ * descobre por quê.
+ *
+ * Aqui as duas listas aparecem: o que entra e o que ficou de fora, com o
+ * motivo ao lado. É a diferença entre um número para acreditar e um número
+ * para conferir — e num app sem servidor, conferir é a única auditoria que
+ * existe.
+ */
+function contaDoCustoMinimo(v) {
+  const { dentro, fora } = v.fixosDoCusto;
+  if (!dentro.length && !fora.length) return '';
+
+  const linhaFixo = (r, dentroDaConta) => `
+    <button class="row" data-act="fixos">
+      <div class="ic ${dentroDaConta ? 'j' : ''}">${icon(dentroDaConta ? 'check' : 'x')}</div>
+      <div class="bd"><div class="t">${esc(r.label)}</div>
+        <div class="s">${pilulasDaLinha([r.categoria || 'sem categoria', dentroDaConta ? null : r.motivo])}</div></div>
+      <div class="rt"><div class="amt num">${m(r.amountCents, brlShort)}</div></div>
+    </button>`;
+
+  return `
+  <details class="sec dobra" style="margin-top:12px">
+    <summary>
+      <span>De onde vem o custo mínimo</span>
+      <span class="dobra-nota">${dentro.length} ${dentro.length === 1 ? 'conta entra' : 'contas entram'}${
+        fora.length ? ` · ${fora.length} fora` : ''}</span>
+    </summary>
+
+    <p class="empty" style="text-align:left;padding:10px 4px;font-size:11.5px">
+      Só entra gasto fixo de categoria essencial — o que não dá para cortar num
+      aperto. O resto continua contando na projeção e no "quanto sobra"; só não
+      entra nesta linha de água.
+    </p>
+
+    ${dentro.length ? `<div class="list">${dentro.map((r) => linhaFixo(r, true)).join('')}</div>` : ''}
+
+    ${fora.length ? `
+      <div class="bloco-titulo" style="margin-top:14px">Fora da conta</div>
+      <div class="list">${fora.map((r) => linhaFixo(r, false)).join('')}</div>
+      <p class="empty" style="text-align:left;padding:10px 4px;font-size:11.5px">
+        São ${m(v.fixosForaDoCustoCents, brlShort)} por mês. Se algum destes é
+        essencial de verdade para você — plano de saúde, escola, transporte —
+        toque nele e mude a categoria, ou crie uma categoria essencial nova.
+      </p>` : ''}
+  </details>`;
+}
+
+/**
+ * O aviso de falta, no lugar onde ela dói.
+ *
+ * Substitui o "Faltam N coisas para configurar" do Painel, que ficou semanas
+ * na tela sem ser tocado. A diferença não é de texto, é de momento: cobrar
+ * cartão em Faturas, teto na Saúde e cofrinho em Investimentos pega a pessoa
+ * com a pergunta já na cabeça. No Painel era interrupção; aqui é resposta.
+ */
+const faltaAqui = (titulo, texto, acao, rotulo) => `
+  <div class="sec">
+    <div class="falta">
+      <div class="falta-ic">${icon('ajuda')}</div>
+      <div class="falta-txt">
+        <b>${esc(titulo)}</b>
+        <i>${esc(texto)}</i>
+      </div>
+      <button class="btn primary falta-btn" data-${acao.startsWith('go:') ? 'go' : 'act'}="${esc(acao.replace('go:', ''))}">${esc(rotulo)}</button>
+    </div>
+  </div>`;
+
 /** Bom dia, boa tarde, boa noite — e boa madrugada para quem está acordado. */
 function saudacaoDoDia(agora = new Date()) {
   const h = agora.getHours();
@@ -486,11 +559,21 @@ function painel(app) {
         </div>
       </div>`;
 
-  const guia = v.guia.pendentes.length
+  // O checklist genérico saiu do Painel.
+  //
+  // "Faltam 2 coisas para configurar" ficou semanas na tela sem ser tocado —
+  // aviso que aparece em todo lugar não aparece em lugar nenhum. Cada falta
+  // agora é cobrada onde ela dói: cartão em Faturas, teto na Saúde, cofrinho
+  // em Investimentos. Ali a pessoa já está com a pergunta na cabeça.
+  //
+  // Sobra um caso no Painel: quem ainda não terminou o começo. Aí não é
+  // lembrete, é o próximo passo — e some assim que a metade estiver feita.
+  const comecando = v.guia.feitos < Math.ceil(v.guia.total / 2);
+  const guia = comecando && v.guia.pendentes.length
     ? `<button class="nudge" data-go="guia">
         <span class="ic">${icon('ajuda')}</span>
-        <div><b>${v.guia.pendentes.length === 1 ? 'Falta 1 coisa' : `Faltam ${v.guia.pendentes.length} coisas`} para configurar</b>
-        <i>${esc(v.guia.pendentes.slice(0, 3).map((p) => p.label.toLowerCase()).join(', '))}</i></div>
+        <div><b>Continue de onde parou</b>
+        <i>${v.guia.feitos} de ${v.guia.total} passos · falta ${esc(v.guia.pendentes[0].label.toLowerCase())}</i></div>
         <span class="arr">${icon('seta')}</span>
       </button>`
     : '';
@@ -955,7 +1038,10 @@ function faturas(app) {
   const v = app.view;
   if (!v.cartoes.length) {
     return `${header(app, { voltar: 'painel' })}
-      <div class="empty" style="margin-top:40px">Cadastre um cartão em Finanças para ver a fatura aqui.</div>`;
+      ${faltaAqui(
+        'Nenhum cartão cadastrado',
+        'Sem cartão o app não sabe em qual fatura cada compra cai — nem quando o dinheiro sai da conta.',
+        'novo-cartao', 'Cadastrar cartão')}`;
   }
 
   const abertoTotal = sum(v.cartoes.map((c) => c.openCents));
@@ -1160,11 +1246,12 @@ function dividas(app) {
   if (!v.dividas.length) {
     return `${header(app, { voltar: 'tudo' })}
       <div class="empty" style="margin-top:40px">
-        Nenhuma dívida cadastrada.<br><br>
-        Se você tem fatura atrasada ou cheque especial, cadastre aqui com a taxa —
-        ela vem escrita na fatura e no extrato.
+        Nenhuma dívida cadastrada — e essa é a melhor notícia possível.
       </div>
-      <div class="btns"><button class="btn primary" data-act="nova-divida">${icon('mais')} Cadastrar dívida</button></div>`;
+      ${faltaAqui(
+        'Tem alguma dívida que eu não sei?',
+        'Fatura atrasada ou cheque especial mudam tudo: a taxa decide a ordem de pagar e quanto o mês custa parado. Ela vem escrita na fatura e no extrato.',
+        'nova-divida', 'Cadastrar dívida')}`;
   }
 
   const plano = v.plano;
@@ -1508,13 +1595,7 @@ function analise(app) {
     </div>
   </div>` : ''}
 
-  ${v.fixosSemCategoria.length ? `
-  <button class="nudge" data-act="fixos" style="width:100%;text-align:left;border:0;font:inherit;margin-top:12px">
-    <span class="ic">${icon('alerta')}</span>
-    <div><b>${v.fixosSemCategoria.length} ${v.fixosSemCategoria.length === 1 ? 'gasto fixo está' : 'gastos fixos estão'} sem categoria</b>
-    <i>São ${m(v.fixosSemCategoriaCents, brlShort)} por mês que ficam de fora do custo mínimo — sem categoria
-       o app não sabe se é aluguel ou streaming. Toque para categorizar.</i></div>
-  </button>` : ''}
+  ${contaDoCustoMinimo(v)}
 
   </section>
   <section class="aba" data-aba="dividas">

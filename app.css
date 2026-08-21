@@ -874,3 +874,20 @@ body {
 .carrossel-grande .carrossel-item > .hero,
 .carrossel-grande .carrossel-item > .plano-dobra { height: 100%; }
 .carrossel-grande .carrossel-item > .hero { margin-top: 0; }
+
+/* ---------- aviso de falta, no lugar onde ela dói ---------- */
+/* Substitui o "Faltam N coisas" do Painel, que ficou semanas na tela sem ser
+   tocado. Aviso que aparece em todo lugar não aparece em lugar nenhum. */
+.falta {
+  background: var(--surface); border: 1px dashed var(--line); border-radius: var(--r-lg);
+  padding: 22px 20px; display: flex; flex-direction: column; align-items: center;
+  gap: 12px; text-align: center;
+}
+.falta-ic {
+  width: 42px; height: 42px; border-radius: 50%; background: var(--amber-soft);
+  display: flex; align-items: center; justify-content: center; color: var(--amber);
+}
+.falta-ic svg { width: 19px; height: 19px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.falta-txt b { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.falta-txt i { display: block; font-style: normal; font-size: 12.5px; color: var(--muted); line-height: 1.6; margin-top: 6px; max-width: 34ch; }
+.falta-btn { max-width: 260px; margin-top: 4px; }
