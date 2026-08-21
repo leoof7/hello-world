@@ -60,7 +60,18 @@ body {
   letter-spacing: -.011em;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
+  /* Caixa de seleção, checkbox e barra de rolagem nativos saem no azul do
+     sistema por padrão. Um azul solto no meio de um app rosa denuncia que a
+     personalização é só pintura por cima. */
+  accent-color: var(--jade);
+  scrollbar-color: var(--line) transparent;
 }
+
+::selection { background: var(--jade-soft); color: var(--ink); }
+
+/* O anel de foco também é a cor do app — e continua existindo, porque teclado
+   sem foco visível é tela inacessível. */
+:focus-visible { outline: 2px solid var(--jade); outline-offset: 2px; border-radius: 6px; }
 
 .app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 

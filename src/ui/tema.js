@@ -73,6 +73,99 @@ export function paletaDe(hex, { escuro = false } = {}) {
   };
 }
 
+/** Mistura duas cores. t=0 devolve `a`, t=1 devolve `b`. */
+export function misturar(a, b, t) {
+  const ca = hexParaRgb(a);
+  const cb = hexParaRgb(b);
+  if (!ca || !cb) return a;
+  const q = Math.max(0, Math.min(1, t));
+  const hexar = (c) => Math.round(c).toString(16).padStart(2, '0');
+  return `#${hexar(ca.r + (cb.r - ca.r) * q)}${hexar(ca.g + (cb.g - ca.g) * q)}${hexar(ca.b + (cb.b - ca.b) * q)}`;
+}
+
+/**
+ * Quanto de cor entra em cada superfície neutra, por tema.
+ *
+ * No claro os números são pequenos de propósito: fundo tingido é ambiente, não
+ * decoração, e passando de ~6% o app deixa de parecer um app de dinheiro e o
+ * texto cinza começa a brigar com o fundo.
+ *
+ * No escuro é o contrário — a mesma proporção some. Um cinza escuro tem pouca
+ * distância até qualquer cor escura, então 5% ali não é sutil, é invisível. Por
+ * isso a força é umas três vezes maior, e ainda assim o fundo continua escuro.
+ */
+const TINTA = {
+  '--bg': { claro: 0.055, escuro: 0.2 },
+  '--surface': { claro: 0.022, escuro: 0.13 },
+  '--surface-2': { claro: 0.05, escuro: 0.17 },
+  '--chip': { claro: 0.1, escuro: 0.22 },
+  '--line': { claro: 0.11, escuro: 0.24 },
+  '--line-2': { claro: 0.07, escuro: 0.16 },
+};
+
+/**
+ * O gradiente do cartão-herói, puxado para a cor escolhida.
+ *
+ * O herói é escuro nos dois temas — é o cartão preto do topo do Painel. Aqui
+ * ele deixa de ser preto-neutro e passa a ser a versão bem escura da cor: é o
+ * lugar onde a personalização aparece mais e custa menos legibilidade, porque
+ * o texto por cima é sempre branco.
+ */
+export function heroDe(hex) {
+  const escuro = misturar('#0d1116', hex, 0.14);
+  const meio = misturar('#181d24', hex, 0.18);
+  const claro = misturar('#212832', hex, 0.22);
+  return `linear-gradient(160deg, ${escuro} 0%, ${meio} 55%, ${claro} 100%)`;
+}
+
+/** rgba() a partir de um hex — para o brilho do herói, que precisa de alfa. */
+export function comAlfa(hex, alfa) {
+  const rgb = hexParaRgb(hex);
+  if (!rgb) return `rgba(0,0,0,${alfa})`;
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${alfa})`;
+}
+
+/**
+ * As superfícies neutras tingidas pela cor escolhida.
+ *
+ * Recebe os neutros que o CSS declarou em vez de guardar cópia deles: duas
+ * listas de cinzas, uma no CSS e outra aqui, saem de sincronia no primeiro
+ * ajuste de tema que alguém fizer.
+ */
+export function superficiesTingidas(neutros, hex, { escuro = false } = {}) {
+  // No escuro a cor precisa vir mais escura que ela mesma, senão tingir o
+  // fundo o clareia — e um fundo que clareia arruína o tema escuro inteiro.
+  // Escurecer multiplicando os canais mantém o matiz: rosa continua rosa.
+  const tinta = escuro ? ajustar(hex, -0.42) : hex;
+  const saida = {};
+  for (const [token, forca] of Object.entries(TINTA)) {
+    if (neutros[token]) saida[token] = misturar(neutros[token], tinta, escuro ? forca.escuro : forca.claro);
+  }
+  return saida;
+}
+
+/**
+ * A cor da barra do sistema no app instalado.
+ *
+ * É a faixa acima do app na tela cheia do iPhone e a barra de endereço no
+ * Android. Sem isto ela fica no cinza fixo do index.html e cria uma emenda
+ * visível logo acima do conteúdo tingido — o app parece colado dentro de outro.
+ *
+ * Com tema explícito as duas metas recebem a mesma cor: o app decidiu ignorar
+ * a preferência do sistema, e a barra tem que ignorar junto. No automático só
+ * a meta do esquema atual muda, porque a outra ainda vale se o sistema virar.
+ */
+export function pintarBarraDoSistema(cor, { escuro = false, explicito = false, doc = document } = {}) {
+  const metas = [...doc.querySelectorAll('meta[name="theme-color"]')];
+  if (!metas.length) return null;
+  const alvo = escuro ? 'dark' : 'light';
+  for (const meta of metas) {
+    const media = meta.getAttribute('media') || '';
+    if (explicito || !media || media.includes(alvo)) meta.setAttribute('content', cor);
+  }
+  return cor;
+}
+
 /**
  * Aplica a cor no documento. Chamado no arranque e a cada troca.
  * `corId` é um dos presets; `corLivre` é um hex e vence o preset quando existe.
@@ -97,5 +190,24 @@ export function aplicarCor({ corId = 'jade', corLivre = null } = {}, raiz = docu
   raiz.style.setProperty('--jade-2', p.jade2);
   raiz.style.setProperty('--on-jade', p.onJade);
   raiz.style.setProperty('--jade-soft', p.jadeSoft);
+
+  // Ambiente: as superfícies neutras ganham um fio da cor. Os neutros são
+  // lidos do CSS com os overrides removidos primeiro — senão a segunda troca
+  // de cor tingiria o resultado da primeira, e a cada clique o app escureceria.
+  for (const token of Object.keys(TINTA)) raiz.style.removeProperty(token);
+  if (typeof getComputedStyle === 'function') {
+    const css = getComputedStyle(raiz);
+    const neutros = {};
+    for (const token of Object.keys(TINTA)) neutros[token] = css.getPropertyValue(token).trim();
+    const tingidas = superficiesTingidas(neutros, hex, { escuro });
+    for (const [token, valor] of Object.entries(tingidas)) raiz.style.setProperty(token, valor);
+    if (tingidas['--bg']) {
+      pintarBarraDoSistema(tingidas['--bg'], { escuro, explicito: !!raiz.dataset.theme });
+    }
+  }
+
+  raiz.style.setProperty('--hero', heroDe(p.jade));
+  raiz.style.setProperty('--hero-glow', comAlfa(p.jade, escuro ? 0.22 : 0.34));
+
   return p;
 }

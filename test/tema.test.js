@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hexParaRgb, luminancia, textoSobre, ajustar, paletaDe, CORES } from '../src/ui/tema.js';
+import {
+  hexParaRgb, luminancia, textoSobre, ajustar, paletaDe, CORES,
+  misturar, heroDe, comAlfa, superficiesTingidas,
+} from '../src/ui/tema.js';
 
 test('lê hex de três e de seis dígitos, com ou sem cerquilha', () => {
   assert.deepEqual(hexParaRgb('#ffffff'), { r: 255, g: 255, b: 255 });
@@ -73,4 +76,92 @@ test('os presets são legíveis nos dois temas', () => {
     const contrasteClaro = Math.abs(luminancia(c.base) - luminancia('#ffffff'));
     assert.ok(contrasteClaro > 0.3, `${c.nome} com texto branco no tema claro tem contraste fraco`);
   }
+});
+
+// ------------------------------------------- a cor tingindo o app inteiro
+
+// Os mesmos neutros que o app.css declara. Se um dia divergirem, estes testes
+// deixam de valer para a tela de verdade — por isso a leitura em produção é do
+// CSS, e aqui eles entram só como amostra.
+const NEUTROS_CLARO = {
+  '--bg': '#f4f5f7', '--surface': '#ffffff', '--surface-2': '#f6f7f9',
+  '--chip': '#eef0f3', '--line': '#e6e8ec', '--line-2': '#f0f1f4',
+};
+const NEUTROS_ESCURO = {
+  '--bg': '#12151a', '--surface': '#191d24', '--surface-2': '#232833',
+  '--chip': '#2b313d', '--line': '#2b313c', '--line-2': '#232833',
+};
+
+// Cores que quebram tudo se a mistura estiver ingênua: amarelo puro, branco,
+// preto e um ciano estourado.
+const EXTREMAS = ['#ffff00', '#ffffff', '#000000', '#00ffff', '#ff0000'];
+const TODAS = [...CORES.map((c) => c.base), ...EXTREMAS];
+
+test('misturar respeita as pontas e o meio', () => {
+  assert.equal(misturar('#000000', '#ffffff', 0), '#000000');
+  assert.equal(misturar('#000000', '#ffffff', 1), '#ffffff');
+  assert.equal(misturar('#000000', '#ffffff', 0.5), '#808080');
+});
+
+test('misturar não estoura com fator fora da faixa', () => {
+  assert.equal(misturar('#000000', '#ffffff', 5), '#ffffff');
+  assert.equal(misturar('#000000', '#ffffff', -3), '#000000');
+});
+
+// O risco real da ideia: fundo tingido que come o texto. Se este teste cair,
+// a tinta está forte demais e a tela ficou pior, não mais bonita.
+test('nenhuma cor deixa o texto ilegível sobre o fundo tingido', () => {
+  for (const hex of TODAS) {
+    const claro = superficiesTingidas(NEUTROS_CLARO, hex, { escuro: false });
+    const escuro = superficiesTingidas(NEUTROS_ESCURO, hex, { escuro: true });
+
+    const contrasteClaro = Math.abs(luminancia(claro['--bg']) - luminancia('#0d1116'));
+    const contrasteEscuro = Math.abs(luminancia(escuro['--bg']) - luminancia('#f2f4f7'));
+
+    assert.ok(contrasteClaro > 0.7, `${hex}: fundo claro tingido perdeu contraste (${contrasteClaro.toFixed(2)})`);
+    assert.ok(contrasteEscuro > 0.7, `${hex}: fundo escuro tingido perdeu contraste (${contrasteEscuro.toFixed(2)})`);
+  }
+});
+
+test('o tema escuro continua escuro depois de tingido', () => {
+  for (const hex of TODAS) {
+    const s = superficiesTingidas(NEUTROS_ESCURO, hex, { escuro: true });
+    assert.ok(luminancia(s['--bg']) < 0.06, `${hex} clareou o fundo escuro`);
+    assert.ok(luminancia(s['--surface']) < 0.08, `${hex} clareou o cartão escuro`);
+  }
+});
+
+test('o tema claro continua claro depois de tingido', () => {
+  for (const hex of TODAS) {
+    const s = superficiesTingidas(NEUTROS_CLARO, hex, { escuro: false });
+    assert.ok(luminancia(s['--bg']) > 0.75, `${hex} escureceu o fundo claro`);
+  }
+});
+
+test('a cor entra de verdade — tingido não é igual ao neutro', () => {
+  const s = superficiesTingidas(NEUTROS_CLARO, '#c2306e', { escuro: false });
+  assert.notEqual(s['--bg'], NEUTROS_CLARO['--bg'], 'se nada muda, a personalização não existe');
+  assert.notEqual(s['--chip'], NEUTROS_CLARO['--chip']);
+});
+
+test('tingir duas vezes a mesma cor dá o mesmo resultado', () => {
+  const uma = superficiesTingidas(NEUTROS_CLARO, '#1f6fd0', { escuro: false });
+  const outra = superficiesTingidas(NEUTROS_CLARO, '#1f6fd0', { escuro: false });
+  assert.deepEqual(uma, outra, 'a função é pura — o acúmulo é problema de quem aplica');
+});
+
+test('o herói fica escuro o bastante para texto branco em qualquer cor', () => {
+  for (const hex of TODAS) {
+    const paradas = heroDe(hex).match(/#[0-9a-f]{6}/gi) || [];
+    assert.equal(paradas.length, 3, `${hex}: o gradiente precisa das três paradas`);
+    for (const p of paradas) {
+      const contraste = Math.abs(luminancia(p) - luminancia('#ffffff'));
+      assert.ok(contraste > 0.75, `${hex}: parada ${p} clara demais para texto branco`);
+    }
+  }
+});
+
+test('comAlfa vira rgba e aguenta hex inválido', () => {
+  assert.equal(comAlfa('#0a7b5a', 0.3), 'rgba(10,123,90,0.3)');
+  assert.match(comAlfa('nada', 0.3), /^rgba\(/);
 });

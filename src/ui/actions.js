@@ -376,16 +376,49 @@ function escolherArquivo(accept) {
 const ACOES = {
 
   // ---- topo ----
+  /**
+   * Escolher o tema, não adivinhar qual vem depois.
+   *
+   * Antes isto era um ciclo auto → escuro → claro a cada toque: para sair do
+   * escuro no meio da noite a pessoa tinha que passar pelo claro. Agora é uma
+   * folha com as três opções, e a que está valendo aparece marcada.
+   */
   async tema() {
     const atual = app.doc.settings.theme || 'auto';
-    const proximo = atual === 'auto' ? 'dark' : atual === 'dark' ? 'light' : 'auto';
-    if (proximo === 'auto') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = proximo;
+    const opcoes = [
+      { id: 'auto', ic: 'engrenagem', nome: 'Seguir o sistema', sub: 'muda junto com o iPhone' },
+      { id: 'light', ic: 'grafico', nome: 'Claro', sub: 'papel quente, com um fio da sua cor' },
+      { id: 'dark', ic: 'lua', nome: 'Escuro', sub: 'fundo puxado para a sua cor' },
+    ];
+
+    const escolha = await sheet(
+      `<h4>Tema</h4><p class="sub">Vale para o app inteiro. A sua cor continua a mesma nos dois.</p>
+       <div class="list">${opcoes.map((o) => `
+         <button class="row" data-tema="${o.id}">
+           <div class="ic ${o.id === atual ? 'j' : ''}">${icon(o.ic)}</div>
+           <div class="bd"><div class="t">${esc(o.nome)}</div><div class="s">${esc(o.sub)}</div></div>
+           ${o.id === atual ? `<span class="arr">${icon('check')}</span>` : ''}
+         </button>`).join('')}</div>
+       <div class="btns"><button class="btn ghost" data-x="1" style="width:100%">Fechar</button></div>`,
+      {
+        onMount: (card, fechar) => {
+          card.querySelector('[data-x]').onclick = () => fechar(null);
+          card.querySelectorAll('[data-tema]').forEach((b) => {
+            b.onclick = () => fechar(b.dataset.tema);
+          });
+        },
+      }
+    );
+
+    if (!escolha || escolha === atual) return;
+
+    if (escolha === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = escolha;
     // A mesma cor precisa de tom diferente em fundo claro e escuro — sem isto,
     // trocar o tema deixaria a cor escolhida sumindo ou berrando.
     aplicarCor({ corId: app.doc.settings?.corId, corLivre: app.doc.settings?.corLivre });
-    await commit((d) => { d.settings.theme = proximo; });
-    toast(proximo === 'auto' ? 'Tema: segue o sistema' : proximo === 'dark' ? 'Tema escuro' : 'Tema claro');
+    await commit((d) => { d.settings.theme = escolha; });
+    toast(escolha === 'auto' ? 'Tema: segue o sistema' : escolha === 'dark' ? 'Tema escuro' : 'Tema claro');
   },
 
   privacidade() {

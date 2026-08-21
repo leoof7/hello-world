@@ -22,7 +22,7 @@
 // O cofre vive no IndexedDB e o service worker nem o enxerga. Nada aqui toca
 // nos seus dados.
 
-const VERSAO = '332613966ed5';
+const VERSAO = '936c7e991688';
 const CACHE = `zero-${VERSAO}`;
 
 const ARQUIVOS = [

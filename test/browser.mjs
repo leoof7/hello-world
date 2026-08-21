@@ -216,11 +216,62 @@ for (const tema of ['dark', 'light']) {
   ok('olho fechado esconde os valores',
     await page.evaluate(() => document.body.innerText.includes('••••')));
 
-  // tema
+  // tema: escolher, não ciclar. Antes cada toque avançava auto → escuro →
+  // claro, e para sair do escuro era preciso passar pelo claro.
   await page.click('[data-act="tema"]');
-  await page.waitForTimeout(300);
-  ok('o botão de tema fixa o tema escolhido',
-    await page.evaluate(() => !!document.documentElement.dataset.theme));
+  await page.waitForSelector('.sheet [data-tema]');
+  ok('o tema abre para escolher, com as três opções',
+    (await page.$$('.sheet [data-tema]')).length === 3);
+  ok('e não troca nada só de abrir',
+    await page.evaluate(() => !document.documentElement.dataset.theme));
+
+  await page.click('.sheet [data-tema="dark"]');
+  await page.waitForTimeout(400);
+  ok('escolher escuro fixa o escuro',
+    await page.evaluate(() => document.documentElement.dataset.theme) === 'dark');
+
+  await page.click('[data-act="tema"]');
+  await page.waitForSelector('.sheet [data-tema]');
+  await page.click('.sheet [data-tema="light"]');
+  await page.waitForTimeout(400);
+  ok('e dá para ir direto do escuro para o claro, sem passar por fora',
+    await page.evaluate(() => document.documentElement.dataset.theme) === 'light');
+
+  // a cor tinge o fundo — e tingir de novo não acumula
+  const corDoFundo = () => page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+
+  const neutro = await page.evaluate(() => {
+    const raiz = document.documentElement;
+    const antes = raiz.style.getPropertyValue('--bg');
+    raiz.style.removeProperty('--bg');
+    const puro = getComputedStyle(raiz).getPropertyValue('--bg').trim();
+    if (antes) raiz.style.setProperty('--bg', antes);
+    return puro;
+  });
+  const tingido = await corDoFundo();
+  ok('a cor escolhida tinge o fundo', tingido !== neutro, `${tingido} vs neutro ${neutro}`);
+
+  // Aplicar a mesma cor cinco vezes tem que dar sempre o mesmo fundo. Se a
+  // tinta fosse por cima do resultado anterior, o app escureceria a cada troca.
+  const depoisDeCinco = await page.evaluate(async () => {
+    const { aplicarCor } = await import('./src/ui/tema.js');
+    for (let i = 0; i < 5; i++) aplicarCor({ corId: 'rosa' });
+    return getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  });
+  const umaVez = await page.evaluate(async () => {
+    const { aplicarCor } = await import('./src/ui/tema.js');
+    aplicarCor({ corId: 'jade' });
+    aplicarCor({ corId: 'rosa' });
+    return getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  });
+  ok('trocar de cor não vai acumulando tinta', depoisDeCinco === umaVez, `${depoisDeCinco} vs ${umaVez}`);
+
+  ok('a barra do sistema acompanha o fundo', await page.evaluate(() => {
+    const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    return metas.some((m) => m.getAttribute('content') === bg);
+  }));
 
   ok('nenhum erro de console', erros.length === 0, erros.slice(0, 3).join(' | '));
   await ctx.close();
