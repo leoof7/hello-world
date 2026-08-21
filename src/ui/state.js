@@ -9,7 +9,7 @@ import { today, monthKey, addMonthKey, addDays } from '../core/dates.js';
 import { cycleFor, openCycle, nextCycle, dueDateOf } from '../core/statements.js';
 import { geraFatura, ehCredito, ehBeneficio, valesDe, previsaoDoBeneficio, debitosFuturos } from '../core/cards.js';
 import { byPurchase, wall, committed } from '../core/installments.js';
-import { buildEvents, daily, monthly, freeToSpend, nextIncomeDate } from '../core/projection.js';
+import { buildEvents, daily, monthly, freeToSpend, nextIncomeDate, mensalDoRecorrente } from '../core/projection.js';
 import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, minimumOnlyPlan, minimumsToday, minimumOf, order, ativa, somenteAtivas } from '../core/debts.js';
 import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js';
 import { scan } from '../core/leaks.js';
@@ -93,8 +93,12 @@ export function derive(doc, todayISO = today()) {
   const livre = freeToSpend(saldoCents, eventos, todayISO, proximaEntrada || addDays(todayISO, 30));
 
   // ---- renda e sobra ----
+  // mensalDoRecorrente, e não amountCents: um fixo quinzenal sai duas vezes no
+  // mês. Somar uma só faria o app contar metade do que entra e do que sai — e
+  // o custo de vida mínimo é justamente o número que não pode mentir para
+  // baixo, porque é dele que sai quanto sobra para pagar dívida.
   const rendaFixaCents = sum(
-    (doc.recurring || []).filter((r) => r.kind === 'income').map((r) => Math.abs(r.amountCents))
+    (doc.recurring || []).filter((r) => r.kind === 'income').map(mensalDoRecorrente)
   );
   const extrasMesCents = sum(
     doc.transactions
@@ -102,7 +106,7 @@ export function derive(doc, todayISO = today()) {
       .map((t) => t.amountCents)
   );
   const fixosCents = sum(
-    (doc.recurring || []).filter((r) => r.kind === 'expense').map((r) => Math.abs(r.amountCents))
+    (doc.recurring || []).filter((r) => r.kind === 'expense').map(mensalDoRecorrente)
   );
   // Só os gastos fixos que são essenciais — moradia, contas — servem de base
   // para o custo mínimo enquanto não há 3 meses de histórico. Assinatura e
@@ -111,7 +115,7 @@ export function derive(doc, todayISO = today()) {
   const fixosEssenciaisCents = sum(
     (doc.recurring || [])
       .filter((r) => r.kind === 'expense' && catById[r.categoryId]?.essential)
-      .map((r) => Math.abs(r.amountCents))
+      .map(mensalDoRecorrente)
   );
   // Gasto fixo sem categoria não pode entrar no custo mínimo — não dá para
   // saber se é o aluguel ou o streaming. Mas sumir calado é pior: a pessoa
@@ -119,7 +123,7 @@ export function derive(doc, todayISO = today()) {
   // explica. Estes ficam listados para a tela poder cobrar a categoria.
   const fixosSemCategoria = (doc.recurring || [])
     .filter((r) => r.kind === 'expense' && !catById[r.categoryId])
-    .map((r) => ({ id: r.id, label: r.label, amountCents: Math.abs(r.amountCents) }));
+    .map((r) => ({ id: r.id, label: r.label, amountCents: mensalDoRecorrente(r) }));
   const fixosSemCategoriaCents = sum(fixosSemCategoria.map((r) => r.amountCents));
   const parcelasDoMesCents = muro[0]?.cents || 0;
 

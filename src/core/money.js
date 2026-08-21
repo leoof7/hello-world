@@ -43,9 +43,22 @@ export function brl(cents, options) {
     : `R$ ${s}`;
 }
 
-/** 123456 → "1.234" — para números grandes onde o centavo não importa. */
+/**
+ * 470000 → "R$ 4.700" — versão curta, para KPI e herói.
+ *
+ * Só esconde o centavo quando o centavo de fato não importa. Abaixo de mil
+ * reais ele importa muito: com R$ 21,73 na conta, mostrar "R$ 22" some com
+ * 27 centavos, que é mais de 1% de tudo que a pessoa tem — e ela abre o app,
+ * vê R$ 22 no topo e R$ 21,73 na conta logo abaixo, dois números para o mesmo
+ * dinheiro. Number redondo é conforto de layout; conferir com o extrato é o
+ * que faz alguém confiar no app.
+ */
+export const LIMITE_CENTAVO = 100000; // R$ 1.000,00
+
 export function brlShort(cents) {
   const n = Math.trunc(cents);
+  if (Math.abs(n) < LIMITE_CENTAVO) return brl(n);
+
   const reais = Math.round(Math.abs(n) / 100);
   const inteiro = String(reais).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `${n < 0 ? '−' : ''}R$ ${inteiro}`;

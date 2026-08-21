@@ -45,8 +45,27 @@ export async function buildBackup(document, phrase) {
 }
 
 /** Lê o arquivo de volta. Precisa das mesmas doze palavras. */
-export async function readBackup(file, phrase) {
-  const envelope = typeof file === 'string' ? JSON.parse(file) : file;
+/**
+ * Abre o envelope e confere se é backup do Zero — sem pedir as doze palavras.
+ *
+ * Existe separado de `readBackup` porque a ordem importa: digitar doze
+ * palavras e só então ouvir "esse arquivo não é um backup" é trabalho jogado
+ * fora, e faz a pessoa desconfiar das palavras quando o problema era o arquivo.
+ */
+export function openEnvelope(file) {
+  let envelope;
+  if (typeof file === 'string') {
+    try {
+      envelope = JSON.parse(file);
+    } catch {
+      // Sem esta guarda o erro que chegava na tela era o SyntaxError do
+      // JSON.parse — "Unexpected token < in JSON at position 0" não diz a
+      // ninguém que ele escolheu o arquivo errado.
+      throw new Error('Este arquivo não é um backup do Zero — o conteúdo não é do formato certo.');
+    }
+  } else {
+    envelope = file;
+  }
 
   if (envelope?.magic !== MAGIC) {
     throw new Error('Este arquivo não é um backup do Zero.');
@@ -54,6 +73,11 @@ export async function readBackup(file, phrase) {
   if (envelope.format > FORMAT) {
     throw new Error('Backup gerado por uma versão mais nova do app. Atualize antes de restaurar.');
   }
+  return envelope;
+}
+
+export async function readBackup(file, phrase) {
+  const envelope = openEnvelope(file);
 
   const key = await deriveKeyFromSecret(phraseToBytes(phrase), b64ToBytes(envelope.salt));
 

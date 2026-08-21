@@ -9,6 +9,7 @@ import { toCents, brl, formatCents, sum } from '../core/money.js';
 import { monthKey, formatShort, formatMonthKey } from '../core/dates.js';
 import { parseEntry, splitEntries } from '../core/parse.js';
 import { expand } from '../core/installments.js';
+import { diasDoRecorrente, mensalDoRecorrente } from '../core/projection.js';
 import { learn } from '../core/categorize.js';
 import { KIND as KIND_DIVIDA, validateDebt, ativa } from '../core/debts.js';
 import { KIND, TIPOS, validarCartao, permiteParcelar, ehBeneficio, ehDebito } from '../core/cards.js';
@@ -18,7 +19,7 @@ import { QUIZ } from '../core/perfil.js';
 import { CORES, aplicarCor } from './tema.js';
 import { MERCHANTS } from '../seed/categories.js';
 import * as db from '../data/db.js';
-import { buildBackup, readBackup, deliver, backupFilename, backupStatus, markDone, readFile } from '../data/backup.js';
+import { buildBackup, readBackup, openEnvelope, deliver, backupFilename, backupStatus, markDone, readFile } from '../data/backup.js';
 import { phraseToBytes, limparFrase } from '../data/recovery.js';
 import * as csv from '../io/csv.js';
 import * as ofx from '../io/ofx.js';
@@ -359,6 +360,12 @@ const opcoesOrigem = () => [
 
 const novoId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
+/** "todo dia 5" ou "dias 5 e 20 · 2x no mês" — o que a pessoa precisa conferir. */
+function quandoRepete(r) {
+  const dias = diasDoRecorrente(r);
+  return dias.length > 1 ? `dias ${dias.join(' e ')} · 2x no mês` : `todo dia ${dias[0]}`;
+}
+
 /** Compara duas palavras ignorando caixa, acento e espaço sobrando. */
 const igual = (a, b) =>
   String(a ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -369,7 +376,9 @@ function escolherArquivo(accept) {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = accept;
+    // `accept` só quando quem chama pediu. Filtro herdado de uma chamada
+    // anterior esconderia o arquivo certo sem ninguém entender por quê.
+    if (accept) input.accept = accept;
     input.onchange = async () => {
       const f = input.files?.[0];
       resolve(f ? { nome: f.name, texto: await readFile(f) } : null);
@@ -800,13 +809,14 @@ const ACOES = {
     const fixos = app.doc.recurring.filter((r) => r.kind === 'expense');
     await sheet(`
       <h4>Gastos fixos</h4>
-      <p class="sub">O que sai todo mês no mesmo dia. É o que a projeção usa para saber
-        quanto realmente sobra.</p>
+      <p class="sub">O que se repete todo mês ou de quinze em quinze dias. É o que a
+        projeção usa para saber quanto realmente sobra.</p>
       ${fixos.length ? `<div class="list">${fixos.map((r) => `
         <button class="row" data-act="editar-fixo" data-id="${esc(r.id)}">
           <div class="ic">${icon('relogio')}</div>
-          <div class="bd"><div class="t">${esc(r.label)}</div><div class="s">todo dia ${r.dayOfMonth}</div></div>
-          <div class="rt"><div class="amt num">${esc(brl(-Math.abs(r.amountCents)))}</div></div>
+          <div class="bd"><div class="t">${esc(r.label)}</div><div class="s">${esc(quandoRepete(r))}</div></div>
+          <div class="rt"><div class="amt num">${esc(brl(-mensalDoRecorrente(r)))}</div>
+            ${r.every === 'quinzena' ? '<div class="dt">no mês</div>' : ''}</div>
         </button>`).join('')}</div>` : '<div class="empty">Nenhum gasto fixo cadastrado.</div>'}
       <div class="btns"><button class="btn primary" data-novo="1">${icon('mais')} Adicionar</button>
         <button class="btn ghost" data-x="1">Fechar</button></div>`,
@@ -964,13 +974,31 @@ const ACOES = {
     });
     if (!ok) return;
 
-    const arquivo = await escolherArquivo('.zbk,application/json');
+    // Sem filtro: o iPhone resolve o tipo pela extensão e `.zbk` não é
+    // extensão conhecida do iOS, então qualquer accept apagava o próprio
+    // backup no seletor de Arquivos. Quem protege é a conferência abaixo.
+    const arquivo = await escolherArquivo();
     if (!arquivo) return;
+
+    // Confere o arquivo antes de pedir as doze palavras.
+    try {
+      openEnvelope(arquivo.texto);
+    } catch (e) {
+      toast(e.message || 'Não consegui abrir esse arquivo.');
+      return;
+    }
 
     const frase = await pedirFraseCurta('Doze palavras', 'As mesmas que você anotou quando criou o cofre.');
     if (!frase) return;
 
-    const documento = await readBackup(arquivo.texto, frase);
+    let documento;
+    try {
+      documento = await readBackup(arquivo.texto, frase);
+    } catch (e) {
+      toast(e.message || 'Não consegui abrir esse backup.');
+      return;
+    }
+
     app.doc = await db.save(app.key, documento);
     draw();
     toast('Backup restaurado.');
@@ -1258,8 +1286,6 @@ async function editarLancamento(id, sugestao = {}) {
       { name: 'categoryId', label: 'Categoria', type: 'select', value: tx?.categoryId ?? sugestao.categoryId ?? '', options: opcoesCategoria() },
       { name: 'count', label: 'Parcelas', type: 'number', value: sugestao.count || 1, min: 1, max: 48,
         hint: '1 para à vista. Só existe pagando no crédito.' },
-      { name: 'extraordinary', label: 'Entrada avulsa (trader, serviço por fora)', type: 'checkbox', value: tx?.extraordinary ?? sugestao.extraordinary ?? false,
-        hint: 'marque se não é o seu salário de sempre. Entra na soma do mês, mas a projeção não conta com ela se repetir mês que vem' },
     ],
     {
       ok: tx ? 'Salvar' : 'Lançar',
@@ -1269,7 +1295,6 @@ async function editarLancamento(id, sugestao = {}) {
         const campoOrigem = card.querySelector('#f-origem');
         const rotuloOrigem = card.querySelector('label[for="f-origem"]');
         const linhaParcelas = card.querySelector('[name="count"]').closest('.field');
-        const linhaAvulsa = card.querySelector('[name="extraordinary"]').closest('.field');
 
         const atualizar = () => {
           const ehEntrada = hiddenEntrada.value === 'entrada';
@@ -1288,7 +1313,6 @@ async function editarLancamento(id, sugestao = {}) {
           const podeParcelar = !ehEntrada && cartao && permiteParcelar(cartao);
           linhaParcelas.style.display = podeParcelar ? '' : 'none';
           if (!podeParcelar) card.querySelector('[name="count"]').value = 1;
-          linhaAvulsa.style.display = ehEntrada ? '' : 'none';
         };
 
         hiddenEntrada.addEventListener('change', atualizar);
@@ -1386,7 +1410,11 @@ async function editarLancamento(id, sugestao = {}) {
     cardId,
     accountId,
     method: cardId ? 'credit' : tx?.method || null,
-    extraordinary: entradaFinal && r.extraordinary,
+    // A caixa "entrada avulsa" saiu do formulário: no meio de um lançamento
+    // comum ela era uma pergunta contábil que ninguém pediu. A marcação
+    // continua existindo, mas agora só vem do contexto — de "Lançar" dentro
+    // de Recebimentos → Avulsos, onde a pessoa já disse o que está fazendo.
+    extraordinary: entradaFinal && (tx?.extraordinary ?? sugestao.extraordinary ?? false),
   };
 
   if (cardId) {
@@ -1997,12 +2025,32 @@ async function editarRecorrente(id, kind) {
     r0 ? 'Editar' : entrada ? 'Nova entrada fixa' : 'Novo gasto fixo',
     entrada ? 'Só o que entra todo mês na mesma data. O avulso vai em Recebimentos → Avulsos.' : null,
     [
-      { name: 'label', label: 'Nome', type: 'text', value: r0?.label || '', placeholder: entrada ? 'Salário' : 'Aluguel' },
-      { name: 'valor', label: 'Valor', type: 'money', value: Math.abs(r0?.amountCents || 0) },
+      { name: 'label', label: 'Nome', type: 'text', value: r0?.label || '',
+        placeholder: entrada ? 'Salário' : 'Aluguel' },
+      { name: 'valor', label: 'Valor', type: 'money', value: Math.abs(r0?.amountCents || 0),
+        hint: 'o valor de CADA vez, não o total do mês' },
+      { name: 'every', label: 'Com que frequência', type: 'segmento', value: r0?.every || 'mes',
+        options: [{ value: 'mes', label: 'Todo mês' }, { value: 'quinzena', label: 'De 15 em 15 dias' }] },
       { name: 'dia', label: 'Todo dia', type: 'number', value: r0?.dayOfMonth || 5, min: 1, max: 28,
         hint: 'até 28, para o dia existir em todos os meses' },
+      { name: 'dia2', label: 'E também dia', type: 'number', value: r0?.dayOfMonth2 || 20, min: 1, max: 28 },
       ...(entrada ? [] : [{ name: 'categoryId', label: 'Categoria', type: 'select', value: r0?.categoryId || '', options: opcoesCategoria() }]),
-    ], { ok: 'Salvar', apagar: r0 ? 'Apagar' : null });
+    ], {
+      ok: 'Salvar',
+      apagar: r0 ? 'Apagar' : null,
+      aoMontar: (card) => {
+        const freq = card.querySelector('[name="every"]');
+        const linhaDia2 = card.querySelector('[name="dia2"]').closest('.field');
+        const rotuloDia = card.querySelector('label[for="f-dia"]');
+        const atualizar = () => {
+          const quinzenal = freq.value === 'quinzena';
+          linhaDia2.style.display = quinzenal ? '' : 'none';
+          rotuloDia.textContent = quinzenal ? 'Dia' : 'Todo dia';
+        };
+        freq.addEventListener('change', atualizar);
+        atualizar();
+      },
+    });
   if (!r) return;
 
   if (r.__apagar) {
@@ -2017,11 +2065,15 @@ async function editarRecorrente(id, kind) {
     r.categoryId = criada;
   }
 
+  const dia = (n, padrao) => Math.min(28, Math.max(1, Number(n) || padrao));
+  const quinzenal = r.every === 'quinzena';
   const registro = {
     id: id || novoId('rc'),
     label: r.label || (entrada ? 'Entrada' : 'Gasto fixo'),
     amountCents: Math.abs(r.valor),
-    dayOfMonth: Math.min(28, Math.max(1, Number(r.dia) || 5)),
+    dayOfMonth: dia(r.dia, 5),
+    every: quinzenal ? 'quinzena' : 'mes',
+    dayOfMonth2: quinzenal ? dia(r.dia2, 20) : null,
     kind,
     categoryId: r.categoryId || null,
     fixed: true,

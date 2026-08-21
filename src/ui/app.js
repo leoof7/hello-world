@@ -426,7 +426,7 @@ export function documentoNovo() {
 
 /** Restaurar backup antes mesmo de entrar no app — o caso "troquei de celular". */
 async function restaurarNoArranque() {
-  const { readBackup, readFile } = await import('../data/backup.js');
+  const { readBackup, readFile, openEnvelope } = await import('../data/backup.js');
 
   lockScreen(`
     <div class="boot-mark">Zero<i></i></div>
@@ -444,7 +444,11 @@ async function restaurarNoArranque() {
     $('#arq').onclick = () => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.zbk,application/json';
+      // Sem filtro de propósito. O iPhone resolve o tipo pela extensão, e
+      // `.zbk` não é extensão que o iOS conheça — com accept=".zbk,application/json"
+      // o próprio backup aparecia apagado no seletor, impossível de escolher.
+      // Um filtro que esconde o arquivo certo é pior que filtro nenhum: quem
+      // realmente protege é a conferência do conteúdo, logo abaixo.
       input.onchange = async () => {
         const f = input.files?.[0];
         resolve(f ? await readFile(f) : null);
@@ -453,6 +457,16 @@ async function restaurarNoArranque() {
     };
   });
   if (!arquivo) return null;
+
+  // Confere o arquivo ANTES de pedir as doze palavras: digitar as doze para
+  // então ouvir "esse não é um backup" faz a pessoa desconfiar das palavras
+  // quando o errado era o arquivo.
+  try {
+    openEnvelope(arquivo);
+  } catch (e) {
+    toast(e.message || 'Não consegui abrir esse arquivo.');
+    return null;
+  }
 
   try {
     const frase = await pedirFrase();

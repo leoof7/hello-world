@@ -9,9 +9,34 @@ import { sum } from './money.js';
 import { addDays, daysBetween, clampedDay, parts, monthKey, addMonthKey, min as minDate } from './dates.js';
 
 /**
+ * Em que dias do mês este lançamento fixo acontece.
+ *
+ * Nem tudo que repete repete uma vez por mês. Diarista, pensão e mesada
+ * costumam ser de quinze em quinze dias, e o Pix agendado segue o mesmo
+ * ritmo. Cadastrar isso como mensal fazia o app contar METADE do que sai —
+ * e o custo de vida mínimo é justamente o número que não pode mentir para
+ * baixo, porque é dele que sai quanto sobra para pagar dívida.
+ *
+ * A quinzena é modelada como dois dias do mês, e não como "a cada 14 dias",
+ * porque é assim que acontece na vida: dia 5 e dia 20. Um contador de dias
+ * corridos iria escorregando pelo calendário e nunca bateria com o extrato.
+ */
+export function diasDoRecorrente(r) {
+  const primeiro = Math.min(28, Math.max(1, Number(r?.dayOfMonth) || 5));
+  if (r?.every !== 'quinzena') return [primeiro];
+
+  const segundo = Math.min(28, Math.max(1, Number(r?.dayOfMonth2) || ((primeiro + 15) % 28 || 28)));
+  return segundo === primeiro ? [primeiro] : [primeiro, segundo].sort((a, b) => a - b);
+}
+
+/** Quanto este fixo custa por mês somando todas as vezes que ele acontece. */
+export const mensalDoRecorrente = (r) => Math.abs(r?.amountCents || 0) * diasDoRecorrente(r).length;
+
+/**
  * Gera os eventos de caixa entre duas datas.
  *
- * recurring: [{ id, label, dayOfMonth, amountCents, kind:'income'|'expense' }]
+ * recurring: [{ id, label, dayOfMonth, amountCents, kind:'income'|'expense',
+ *               every?: 'mes'|'quinzena', dayOfMonth2? }]
  * statements: [{ dueDate, totalCents, cardName }]  — faturas a pagar
  * scheduled: [{ date, amountCents, label }]        — boletos e avulsos
  */
@@ -19,20 +44,27 @@ export function buildEvents({ recurring = [], statements = [], scheduled = [] },
   const events = [];
 
   for (const r of recurring) {
+    const dias = diasDoRecorrente(r);
     let key = monthKey(fromISO);
     for (let i = 0; i < 24; i++) {
       const [y, m] = key.split('-').map(Number);
-      const date = clampedDay(y, m, r.dayOfMonth);
-      if (date >= fromISO && date <= toISO) {
-        events.push({
-          date,
-          amountCents: r.kind === 'income' ? Math.abs(r.amountCents) : -Math.abs(r.amountCents),
-          label: r.label,
-          kind: r.kind,
-          sourceId: r.id,
-        });
+      let passouDoFim = false;
+
+      for (const dia of dias) {
+        const date = clampedDay(y, m, dia);
+        if (date >= fromISO && date <= toISO) {
+          events.push({
+            date,
+            amountCents: r.kind === 'income' ? Math.abs(r.amountCents) : -Math.abs(r.amountCents),
+            label: r.label,
+            kind: r.kind,
+            sourceId: r.id,
+          });
+        }
+        if (date > toISO) passouDoFim = true;
       }
-      if (date > toISO) break;
+
+      if (passouDoFim) break;
       key = addMonthKey(key, 1);
     }
   }

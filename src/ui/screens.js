@@ -628,12 +628,40 @@ function faturas(app) {
   const abertoTotal = sum(v.cartoes.map((c) => c.openCents));
   const aPagarTotal = sum(v.cartoes.map((c) => c.nextStatement?.totalCents || 0));
 
+  // "Quanto eu pago este mês" não é só a fatura. É a fatura mais as parcelas
+  // e mais o mínimo das dívidas que estão ativas. Ver R$ 150 de fatura numa
+  // tela e descobrir o resto em outras duas é como alguém se surpreende com
+  // o próprio mês. Dívida pausada não entra — ela não entra em nada.
+  const parcelasMes = v.muro[0]?.cents || 0;
+  const totalDoMes = aPagarTotal + parcelasMes + v.minimosCents;
+  const partes = [
+    { rotulo: 'Faturas', cents: aPagarTotal },
+    { rotulo: 'Parcelas', cents: parcelasMes },
+    { rotulo: 'Mínimo das dívidas', cents: v.minimosCents },
+  ].filter((p) => p.cents > 0);
+
   return `${header(app, { voltar: 'painel' })}
 
   <div class="wrow">
     ${kpi('Fatura aberta', m(abertoTotal, brlShort), 'soma de todos os cartões')}
     ${kpi('A pagar agora', m(aPagarTotal, brlShort), 'próximos vencimentos')}
   </div>
+
+  ${partes.length > 1 ? `
+  <div class="sec">
+    <div class="sh"><h3>O que sai este mês</h3><a>${m(totalDoMes, brlShort)}</a></div>
+    <div class="panel">
+      ${partes.map((p) => `
+        <div class="ft" style="margin:0 0 8px">
+          <span style="font-size:12px;color:var(--muted)">${esc(p.rotulo)}</span>
+          <b class="num" style="font-size:13px">${m(p.cents)}</b>
+        </div>`).join('')}
+      <div class="ft" style="margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line)">
+        <span style="font-size:12px;color:var(--ink-2);font-weight:600">Total</span>
+        <b class="num" style="font-size:17px">${m(totalDoMes)}</b>
+      </div>
+    </div>
+  </div>` : ''}
 
   <div class="sec">
     <div class="sh"><h3>Por cartão</h3></div>
@@ -1499,7 +1527,11 @@ function recebimentos(app) {
     ${fixos.length ? `<div class="list">${fixos.map((r) => `
       <button class="row" data-act="editar-renda" data-id="${esc(r.id)}">
         <div class="ic j">${icon('dinheiro')}</div>
-        <div class="bd"><div class="t">${esc(r.label)}</div><div class="s">todo dia ${r.dayOfMonth}</div></div>
+        <div class="bd"><div class="t">${esc(r.label)}</div>
+          <div class="s">${pilulasDaLinha([
+            r.every === 'quinzena' ? `dias ${r.dayOfMonth} e ${r.dayOfMonth2}` : `todo dia ${r.dayOfMonth}`,
+            r.every === 'quinzena' ? '2x no mês' : null,
+          ])}</div></div>
         <div class="rt"><div class="amt num pos">${m(r.amountCents)}</div></div>
       </button>`).join('')}</div>` : '<div class="empty">Cadastre o salário para a projeção funcionar.</div>'}
   </div>
