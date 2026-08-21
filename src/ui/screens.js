@@ -17,6 +17,7 @@ const corAtualNome = (app) => (app.doc.settings?.corLivre
 import { backupMessage } from '../data/backup.js';
 import { esc, icon, sparkline, colunaDia, pilulasDaLinha } from './dom.js';
 import { anel, anelDePassos, rosca, barraEmpilhada, termometro } from './graficos.js';
+import { carrossel, ligarCarrosseis } from './carrossel.js';
 import { wire } from './actions.js';
 
 const TABS = [
@@ -203,6 +204,7 @@ export function render(app) {
       <div class="screens"><section class="screen active">${onboarding(app)}</section></div>
     `;
     wire(app);
+    ligarCarrosseis();
     return;
   }
 
@@ -212,6 +214,7 @@ export function render(app) {
       <div class="screens"><section class="screen active">${ofertaTour()}</section></div>
     `;
     wire(app);
+    ligarCarrosseis();
     return;
   }
 
@@ -229,6 +232,7 @@ export function render(app) {
     ${tabbar(app.screen)}
   `;
   wire(app);
+  ligarCarrosseis();
 }
 
 /**
@@ -316,6 +320,133 @@ function avisoCard(a) {
     <button class="nudge-x" data-act="dispensar-aviso" data-id="${esc(a.id)}"
       aria-label="Tirar da tela">${icon('x')}</button>
   </div>`;
+}
+
+/**
+ * Os pares de KPI que giram no Painel.
+ *
+ * Cada página do carrossel tem DOIS cards, e não um: o par é o que dá sentido
+ * ao número. "Entra R$ 4.000" sozinho não diz nada; ao lado de "Sai R$ 2.370"
+ * diz tudo. Um card por vez viraria uma sequência de números soltos.
+ *
+ * Páginas que não têm dado ainda somem em vez de mostrar R$ 0 — zero grande na
+ * tela parece defeito, e ninguém precisa girar por três telas de zero.
+ */
+function paresDeKpi(app, v) {
+  const kpiCard = (rotulo, escopo, valor, sub, { cor = null, seta = 'cima', linha = null } = {}) => `
+    <div class="w">
+      <div class="t"><span class="l">${esc(rotulo)}</span>${botaoOlho(escopo)}<div class="ic">${icon(seta)}</div></div>
+      <div class="v num"${cor ? ` style="color:${cor}"` : ''}>${olho(app, escopo, valor)}</div>
+      <div class="s">${sub}</div>
+      ${linha ? `<div class="mc">${linha}</div>` : ''}
+    </div>`;
+
+  const par = (a, b) => (a && b ? `<div class="wrow">${a}${b}</div>` : null);
+
+  const entra = kpiCard('Entra no mês', 'painel-entra',
+    m(v.rendaFixaCents + v.extrasMesCents, brlShort),
+    v.extrasMesCents ? `fixo + ${m(v.extrasMesCents, brlShort)} avulso` : 'salário e fixos',
+    { linha: sparkline(serieEntradas(v), { color: 'var(--positivo)' }) });
+
+  const sai = kpiCard(v.dividaTotalCents ? 'Juros por dia' : 'Sai no mês', 'painel-sai',
+    m(v.dividaTotalCents ? v.jurosDiaCents : v.fixosCents + v.parcelasDoMesCents, brlShort),
+    v.dividaTotalCents ? `${m(v.jurosMesCents, brlShort)} no mês` : `${m(v.parcelasDoMesCents, brlShort)} em parcelas`,
+    { cor: 'var(--negativo)', seta: 'baixo', linha: sparkline(serieSaldo(v), { color: 'var(--negativo)' }) });
+
+  const livre = kpiCard('Livre para gastar', 'painel-livre-kpi',
+    m(v.livre.cents, brlShort),
+    `${m(v.livre.perDayCents, brlShort)} por dia · ${v.livre.days} dias`,
+    { cor: v.livre.cents > 0 ? 'var(--positivo)' : 'var(--negativo)' });
+
+  const fixos = kpiCard('Gastos fixos', 'painel-fixos',
+    m(v.fixosCents, brlShort),
+    `${(app.doc.recurring || []).filter((r) => r.kind === 'expense').length} contas por mês`,
+    { seta: 'baixo' });
+
+  const guardado = kpiCard('Guardado', 'painel-guardado',
+    m(v.reservaCents, brlShort),
+    v.saude.emergency.months >= 0.1 ? `${v.saude.emergency.months.toFixed(1)} meses de reserva` : 'reserva ainda começando',
+    { cor: 'var(--positivo)' });
+
+  const parcelas = kpiCard('Comprometido', 'painel-parcelas',
+    m(v.comprometidoCents, brlShort),
+    `${m(v.parcelasDoMesCents, brlShort)} neste mês`,
+    { seta: 'baixo' });
+
+  const patrimonio = kpiCard('Patrimônio', 'painel-patrimonio',
+    m(v.saude.netWorth.netCents, brlShort),
+    `contas e bens menos dívidas`,
+    { cor: v.saude.netWorth.netCents >= 0 ? 'var(--positivo)' : 'var(--negativo)' });
+
+  return [
+    par(entra, sai),
+    par(livre, fixos),
+    v.reservaCents > 0 || v.comprometidoCents > 0 ? par(guardado, parcelas) : null,
+    par(patrimonio, kpiCard('Este mês', 'painel-gasto-mes',
+      m(v.saude.allocation.totalCents, brlShort), 'somando tudo que saiu', { seta: 'baixo' })),
+  ].filter(Boolean);
+}
+
+/**
+ * O terceiro card do carrossel de destaque.
+ *
+ * Não é um card fixo: é o que hoje tem mais a dizer. Os dois primeiros já
+ * respondem "quando eu saio" e "quanto eu devo"; este responde a pergunta que
+ * sobra, e ela muda conforme a vida da pessoa muda.
+ *
+ * A ordem é de urgência. Reserva zerada com dívida cara é o buraco mais fundo
+ * do sistema — sem reserva, o próximo imprevisto vira dívida nova, e o plano
+ * de saída nunca fecha. Por isso ele fala primeiro.
+ */
+function terceiroDestaque(app, v) {
+  const s = v.saude;
+
+  if (v.dividaTotalCents > 0 && s.emergency.months < 1) {
+    return `<div class="sec"><div class="say">
+      <div class="k eb" style="color:var(--amber)">O buraco embaixo do buraco</div>
+      <div class="q ser">Você tem menos de um mês de reserva.</div>
+      <div class="p">Sem colchão, o próximo imprevisto vira dívida nova e o plano de saída
+        recomeça. Guardar ${m(Math.round(s.minimumCost.cents / 3), brlShort)} por mês já constrói
+        o primeiro mês em um trimestre.</div>
+    </div></div>`;
+  }
+
+  if (s.emergency.months >= 1 && s.emergency.months < s.emergency.targetMonths) {
+    const faltam = s.emergency.targetMonths - Math.floor(s.emergency.months);
+    return `<div class="sec"><div class="say">
+      <div class="k eb" style="color:var(--positivo)">Sua reserva</div>
+      <div class="q ser">Você aguenta ${Math.floor(s.emergency.months)}
+        ${Math.floor(s.emergency.months) === 1 ? 'mês' : 'meses'} sem nenhuma renda.</div>
+      <div class="p">Faltam ${faltam} para os ${s.emergency.targetMonths} que seguram um ano ruim.
+        São ${m(s.emergency.missingCents, brlShort)} — e cada mês guardado é um mês a menos de medo.</div>
+    </div></div>`;
+  }
+
+  if (v.vazamentos.findings.length) {
+    const f = v.vazamentos.findings[0];
+    return `<div class="sec"><button class="say" data-go="revisao" style="width:100%;text-align:left;border:0;font:inherit">
+      <div class="k eb" style="color:var(--negativo)">Vazamento</div>
+      <div class="q ser">${esc(f.name)} está custando ${m(f.yearlyCents, brlShort)} por ano.</div>
+      <div class="p">${f.type === 'duplicada' ? 'Aparece cobrada duas vezes.' : `O preço subiu ${m(f.deltaCents, brlShort)}.`}
+        Toque para ver os outros que encontrei.</div>
+    </button></div>`;
+  }
+
+  if (v.marcos.length) {
+    const marco = v.marcos[v.marcos.length - 1];
+    return `<div class="sec"><div class="say">
+      <div class="k eb" style="color:var(--positivo)">Conquista</div>
+      <div class="q ser">${esc(marco.titulo)}</div>
+      <div class="p">${esc(marco.texto)}</div>
+    </div></div>`;
+  }
+
+  return `<div class="sec"><div class="say">
+    <div class="k eb" style="color:var(--jade)">Patrimônio</div>
+    <div class="q ser">${m(s.netWorth.netCents, brlShort)} é o que sobra se você somar tudo.</div>
+    <div class="p">${m(s.netWorth.contasCents, brlShort)} em contas e ${m(s.netWorth.bensCents, brlShort)} em bens,
+      menos ${m(s.netWorth.liabilitiesCents, brlShort)} de dívida. É o número que mais demora a mudar — e o que mais importa.</div>
+  </div></div>`;
 }
 
 /** Bom dia, boa tarde, boa noite — e boa madrugada para quem está acordado. */
@@ -409,24 +540,9 @@ function painel(app) {
     ${v.avisosNaTela.map(avisoCard).join('')}
   </div>` : ''}
 
-  <div class="wrow">
-    <div class="w">
-      <div class="t"><span class="l">Entra no mês</span>${botaoOlho('painel-entra')}<div class="ic">${icon('cima')}</div></div>
-      <div class="v num">${olho(app, 'painel-entra', m(v.rendaFixaCents + v.extrasMesCents, brlShort))}</div>
-      <div class="s">${v.extrasMesCents ? `fixo + ${m(v.extrasMesCents, brlShort)} avulso` : 'salário e fixos'}</div>
-      <div class="mc">${sparkline(serieEntradas(v), { color: 'var(--positivo)' })}</div>
-    </div>
-    <div class="w">
-      <div class="t"><span class="l">${v.dividaTotalCents ? 'Juros por dia' : 'Sai no mês'}</span>${botaoOlho('painel-sai')}<div class="ic">${icon('baixo')}</div></div>
-      <div class="v num" style="color:var(--negativo)">${olho(app, 'painel-sai', m(v.dividaTotalCents ? v.jurosDiaCents : v.fixosCents + v.parcelasDoMesCents, brlShort))}</div>
-      <div class="s">${v.dividaTotalCents ? `${m(v.jurosMesCents, brlShort)} no mês` : `${m(v.parcelasDoMesCents, brlShort)} em parcelas`}</div>
-      <div class="mc">${sparkline(serieSaldo(v), { color: 'var(--red)' })}</div>
-    </div>
-  </div>
+  ${carrossel('kpis', paresDeKpi(app, v), { classe: 'carrossel-kpi' })}
 
-  ${consultor(v)}
-
-  ${hero}
+  ${carrossel('destaque', [consultor(v), hero, terceiroDestaque(app, v)], { classe: 'carrossel-grande' })}
 
   ${v.cartoes.length ? `
   <div class="sec">
@@ -441,7 +557,7 @@ function painel(app) {
   </div>` : ''}
 
   <div class="sec">
-    <div class="sh"><h3>Últimos lançamentos</h3>${botaoOlho("lancamentos")}<a data-act="novo">Lançar</a></div>
+    <div class="sh"><h3>MARCADOR-DE-VERSAO-NOVA</h3>${botaoOlho("lancamentos")}<a data-act="novo">Lançar</a></div>
     ${v.lancamentos.length
       ? `<div class="list">${v.lancamentos.slice(0, 8).map((t) => linha(t, v)).join('')}</div>`
       : `<div class="empty">Nada lançado ainda.<br>Toque em <b>Lançar</b> para começar.</div>`}

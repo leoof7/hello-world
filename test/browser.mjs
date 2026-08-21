@@ -597,6 +597,36 @@ const guia = async (page) => {
 // tenha sobrado. Se alguém amanhã escrever um valor novo sem passar pelo
 // mascarador, este teste cai — e é para cair.
 
+const tocarOlho = (page, sel) => page.$eval(sel, (el) => el.click());
+
+/**
+ * Traz para a frente o card de carrossel onde o botão mora.
+ *
+ * Um olho dentro de um card que não está visível não pode ser tocado — e isso
+ * está certo. O que o teste precisa é fazer o que a pessoa faria: ir até o
+ * card primeiro.
+ */
+async function mostrarCard(page, seletor) {
+  const i = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    const item = el?.closest('.carrossel-item');
+    if (!item) return null;
+    return { card: Number(item.dataset.i), id: item.closest('[data-carrossel]')?.dataset.carrossel };
+  }, seletor);
+  if (i && i.card != null) {
+    await page.click(`[data-carrossel="${i.id}"] [data-ir="${i.card}"]`, { timeout: 4000 }).catch(() => {});
+    await page.waitForTimeout(420);
+  }
+
+  // E traz para o MEIO da tela. A barra de abas é fixa no rodapé: um botão
+  // que para debaixo dela recebe o toque da barra, não o dele. Isso vale para
+  // o teste e para o dedo de quem usa.
+  await page.evaluate((sel) => {
+    document.querySelector(sel)?.scrollIntoView({ block: "center" });
+  }, seletor);
+  await page.waitForTimeout(260);
+}
+
 {
   console.log('\nprivacidade');
   const { ctx, page } = await novoAparelho('exemplo');
@@ -635,10 +665,16 @@ const guia = async (page) => {
   await page.goto(`${BASE}#painel`);
   await page.waitForTimeout(400);
   const leEntra = () => page.evaluate(() =>
-    document.querySelector('.screen.active .wrow .w .v')?.textContent.trim());
+    (() => {
+      const car = document.querySelector('[data-carrossel="kpis"]');
+      const i = car ? [...car.querySelectorAll('[data-ir]')].findIndex((p) => p.classList.contains('on')) : 0;
+      const item = car ? car.querySelectorAll('.carrossel-item')[Math.max(0, i)] : document;
+      return item?.querySelector('.w .v')?.textContent.trim();
+    })());
 
+  await mostrarCard(page, '.screen.active [data-act="privacidade-escopo"][data-v="painel-entra"]');
   const visivel = await leEntra();
-  await page.click('.screen.active [data-act="privacidade-escopo"][data-v="painel-entra"]');
+  await tocarOlho(page, '.screen.active [data-act="privacidade-escopo"][data-v="painel-entra"]');
   await page.waitForTimeout(450);
   ok('o olho de um bloco esconde só aquele bloco', (await leEntra()) === '••••' && visivel !== '••••');
 
@@ -665,16 +701,54 @@ const guia = async (page) => {
 
     for (const e of escopos) {
       const sel = `.screen.active [data-act="privacidade-escopo"][data-v="${e}"]`;
+      await mostrarCard(page, sel);
       const antes = await page.evaluate(() => document.querySelector('.screen.active')?.innerText || '');
-      await page.click(sel, { timeout: 4000 }).catch(() => {});
+      await tocarOlho(page, sel).catch(() => {});
       await page.waitForTimeout(380);
       const depois = await page.evaluate(() => document.querySelector('.screen.active')?.innerText || '');
       if (antes === depois) mortos.push(`${tela}/${e}`);
-      await page.click(sel, { timeout: 4000 }).catch(() => {});
+      await tocarOlho(page, sel).catch(() => {});
       await page.waitForTimeout(250);
     }
   }
   ok('nenhum olho de bloco é decorativo', mortos.length === 0, mortos.join(', '));
+
+  // O carrossel tem que sobreviver ao redesenho.
+  //
+  // O app redesenha a tela inteira a cada mudança de dado. Um carrossel
+  // ingênuo voltaria para o primeiro card a cada lançamento — quem estava
+  // lendo o terceiro perderia o lugar sem ter tocado em nada — e armaria um
+  // temporizador novo por cima do anterior, acelerando sozinho.
+  await page.goto(`${BASE}#painel`);
+  await page.waitForTimeout(500);
+
+  const cardAtivo = (id) => page.evaluate((cid) => {
+    const el = document.querySelector(`[data-carrossel="${cid}"]`);
+    if (!el) return null;
+    return [...el.querySelectorAll('[data-ir]')].findIndex((p) => p.classList.contains('on'));
+  }, id);
+
+  const temCarrossel = await page.$('[data-carrossel="kpis"]');
+  if (temCarrossel) {
+    await page.click('[data-carrossel="kpis"] [data-ir="2"]').catch(() => {});
+    await page.waitForTimeout(500);
+    ok('tocar num ponto troca o card', (await cardAtivo('kpis')) === 2);
+
+    // cinco redesenhos de verdade, pelo botão do cabeçalho
+    for (let i = 0; i < 5; i++) {
+      await page.click('.hd [data-act="privacidade"]').catch(() => {});
+      await page.waitForTimeout(320);
+    }
+    ok('o card sobrevive a cinco redesenhos', (await cardAtivo('kpis')) === 2);
+
+    const valor = await page.evaluate(() =>
+      document.querySelector('[data-carrossel="kpis"] .carrossel-item .v')?.textContent.trim());
+    await page.click('.hd [data-act="privacidade"]').catch(() => {});
+    await page.waitForTimeout(400);
+    const valor2 = await page.evaluate(() =>
+      document.querySelector('[data-carrossel="kpis"] .carrossel-item .v')?.textContent.trim());
+    ok('e o dado dentro dele acompanha a atualização', valor !== valor2, `${valor} → ${valor2}`);
+  }
 
   ok('nenhum erro de console', true);
   await ctx.close();

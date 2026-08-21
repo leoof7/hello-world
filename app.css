@@ -849,3 +849,28 @@ body {
 .saudacao-txt { min-width: 0; flex: 1; }
 .wrow .t { display: flex; align-items: center; gap: 6px; }
 .wrow .t .l { flex: 1; min-width: 0; }
+
+/* ---------- carrossel ---------- */
+/* A posição vem de transform, não de rolagem: com scroll-snap o navegador
+   re-encaixava no primeiro item depois de medir a largura e desfazia a
+   reposição a cada atualização de dado. */
+.carrossel { position: relative; margin-top: 16px; }
+.carrossel-janela { overflow: hidden; }
+.carrossel-trilho { display: flex; will-change: transform; }
+.carrossel-item { flex: 0 0 100%; min-width: 0; }
+.carrossel-item > .wrow, .carrossel-item > .sec { margin-top: 0; }
+
+.carrossel-pontos { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+.carrossel-ponto {
+  width: 6px; height: 6px; border-radius: 100px; border: 0; padding: 0; cursor: pointer;
+  background: var(--line); transition: width .22s ease, background .22s ease;
+}
+.carrossel-ponto.on { width: 18px; background: var(--jade); }
+
+/* Altura igual entre as páginas: sem isso o carrossel pula de tamanho a cada
+   giro e a tela inteira dança embaixo do dedo. */
+.carrossel-grande .carrossel-trilho { align-items: stretch; }
+.carrossel-grande .carrossel-item > .sec,
+.carrossel-grande .carrossel-item > .hero,
+.carrossel-grande .carrossel-item > .plano-dobra { height: 100%; }
+.carrossel-grande .carrossel-item > .hero { margin-top: 0; }
