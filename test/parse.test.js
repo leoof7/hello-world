@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseEntry, extractAmount, extractDate, wordsToNumber, extractInstallments } from '../src/core/parse.js';
+import { parseEntry, extractAmount, extractDate, wordsToNumber, extractInstallments, extractOrigin, splitEntries } from '../src/core/parse.js';
 import { categorize, pixCounterparty, cleanDescription, learn, ruleFrom } from '../src/core/categorize.js';
 import { findRecurring, priceIncreases, duplicates, scan } from '../src/core/leaks.js';
 import { minimumCostOfLiving, emergencyFund, commitment, savingsRate } from '../src/core/health.js';
@@ -213,4 +213,84 @@ test('taxa de poupança', () => {
   const s = savingsRate(840000, 711600);
   assert.equal(s.savedCents, 128400);
   assert.ok(Math.abs(s.ratio - 0.1529) < 0.001);
+});
+
+// ------------------------------------------------- a data não come o valor
+//
+// Existe porque "dia 12 gastei 50 no posto" virava R$ 12,00: cada extrator lia
+// a frase inteira por conta própria e o de valor pegava o primeiro número que
+// achasse — que era o da data. Erro silencioso, quatro vezes menor.
+
+test('data escrita antes do valor não é confundida com o valor', () => {
+  const r = parseEntry('dia 12 gastei 50 no posto', { todayISO: '2026-08-20' });
+  assert.equal(r.amountCents, -5000, 'o valor é 50, não o dia 12');
+  assert.equal(r.date, '2026-08-12', 'e a data continua sendo lida');
+});
+
+test('data em dd/mm antes do valor também não atrapalha', () => {
+  const r = parseEntry('12/08 paguei 200 de luz', { todayISO: '2026-08-20' });
+  assert.equal(r.amountCents, -20000);
+  assert.equal(r.date, '2026-08-12');
+  assert.equal(r.description, 'Luz', 'e a barra da data não sobra na descrição');
+});
+
+// --------------------------------------------- o parser usa o que você ensinou
+
+test('a frase falada aproveita a memória aprendida na revisão', () => {
+  const semMemoria = parseEntry('gastei 90 no zaffari', { todayISO: '2026-08-20' });
+  assert.equal(semMemoria.categoryId, null, 'na primeira vez o app admite que não sabe');
+
+  const memory = learn({}, { description: 'Zaffari' }, { categoryId: 'mercado' });
+  const comMemoria = parseEntry('gastei 120 no zaffari', { todayISO: '2026-08-20', memory });
+  assert.equal(comMemoria.categoryId, 'mercado', 'na segunda já sabe');
+  assert.equal(comMemoria.categorySource, 'memória');
+});
+
+test('regra do usuário vence o dicionário embutido também na frase', () => {
+  const rules = [{ match: 'posto', categoryId: 'transporte', priority: 10 }];
+  const r = parseEntry('gastei 100 no posto', { todayISO: '2026-08-20', rules });
+  assert.equal(r.categoryId, 'transporte');
+  assert.equal(r.categorySource, 'regra');
+});
+
+// ------------------------------------------------------ de onde saiu o dinheiro
+
+test('reconhece o cartão pelo nome e tira ele da descrição', () => {
+  const cards = [{ id: 'cd1', name: 'Nubank' }];
+  const r = parseEntry('gastei 85 no nubank no mercado', { todayISO: '2026-08-20', cards });
+  assert.equal(r.cardId, 'cd1');
+  assert.ok(!/nubank/i.test(r.description || ''), 'o nome do banco não vira descrição');
+});
+
+test('falar "débito" manda para a conta ligada ao cartão, não para a fatura', () => {
+  const cards = [{ id: 'cd1', name: 'Nubank', accountId: 'ac1' }];
+  const r = parseEntry('paguei 40 no debito do nubank', { todayISO: '2026-08-20', cards });
+  assert.equal(r.accountId, 'ac1');
+  assert.equal(r.cardId, null);
+});
+
+test('nome curto demais não casa com meia frase', () => {
+  const origem = extractOrigin('paguei 30 no mercado', { accounts: [{ id: 'a', name: 'Nu' }] });
+  assert.equal(origem, null, '"Nu" tem 2 letras e casaria com qualquer coisa');
+});
+
+// ------------------------------------------------ duas compras na mesma frase
+
+test('divide quando há dois valores de verdade', () => {
+  assert.deepEqual(
+    splitEntries('gastei 50 no mercado e 30 na farmacia'),
+    ['gastei 50 no mercado', '30 na farmacia'],
+  );
+});
+
+test('não divide número escrito por extenso', () => {
+  assert.deepEqual(splitEntries('gastei oitenta e cinco no mercado'), ['gastei oitenta e cinco no mercado']);
+});
+
+test('não divide reais e centavos', () => {
+  assert.deepEqual(splitEntries('85 reais e 50 centavos no posto'), ['85 reais e 50 centavos no posto']);
+});
+
+test('não divide quando só há um valor — dois lugares, uma compra', () => {
+  assert.deepEqual(splitEntries('gastei 50 no mercado e farmacia'), ['gastei 50 no mercado e farmacia']);
 });

@@ -371,3 +371,25 @@ test('categoria fixa sai dos tetos e vira gasto fixo informativo', () => {
   assert.ok(v.categoriasFixas.some((c) => c.id === 'moradia'), 'moradia aparece na lista de gastos fixos');
   assert.ok(!v.categoriasFixas.some((c) => c.id === 'mercado'), 'mercado não é gasto fixo');
 });
+
+test('o mínimo da dívida vence no dia informado, não no dia do cadastro', () => {
+  const doc = emptyDocument();
+  doc.accounts = [{ id: 'ac', name: 'Conta', type: 'checking', balanceCents: 100000 }];
+  // cadastrada HOJE, mas com vencimento no dia 5
+  doc.debts = [{
+    id: 'dv', name: 'Cartão', kind: 'revolving', balanceCents: 200000,
+    monthlyRate: 0.15, minPaymentRate: 0.15, dueDay: 5, since: HOJE,
+  }];
+
+  const v = derive(doc, HOJE);
+  const agendados = v.eventos.filter((e) => e.kind === 'debt');
+  assert.ok(agendados.length > 0, 'o mínimo tem que ser agendado');
+  assert.ok(
+    agendados.every((e) => e.date.endsWith('-05')),
+    `todo mínimo cai no dia 5 — veio ${agendados.map((e) => e.date).join(', ')}`,
+  );
+  assert.ok(
+    !agendados.some((e) => e.date === HOJE),
+    'e nenhum cai hoje só porque a dívida foi cadastrada hoje',
+  );
+});

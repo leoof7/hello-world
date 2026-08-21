@@ -7,7 +7,7 @@
 import { app, commit, go, draw } from './app.js';
 import { toCents, brl, formatCents, sum } from '../core/money.js';
 import { monthKey, formatShort, formatMonthKey } from '../core/dates.js';
-import { parseEntry } from '../core/parse.js';
+import { parseEntry, splitEntries } from '../core/parse.js';
 import { expand } from '../core/installments.js';
 import { learn } from '../core/categorize.js';
 import { KIND, validateDebt } from '../core/debts.js';
@@ -278,51 +278,7 @@ const ACOES = {
   async falar() {
     const frase = await pedirFrase();
     if (!frase) return;
-
-    const lido = parseEntry(frase, {
-      todayISO: app.todayISO,
-      merchants: MERCHANTS,
-      categories: app.doc.categories,
-    });
-
-    // "Coloquei/guardei/depositei X no cofrinho Y" desvia pro depósito direto
-    // — sem isso a frase virava um gasto qualquer, sem ligação nenhuma com o
-    // cofrinho que a pessoa citou.
-    const normFrase = frase.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-    if (/cofrinho|cofre|meta\b/.test(normFrase) && lido.amountCents != null) {
-      const metaAchada = app.doc.goals.find((g) => {
-        const nome = g.name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-        return nome.length > 2 && normFrase.includes(nome);
-      });
-      if (metaAchada) {
-        const valor = Math.abs(lido.amountCents);
-        const ok = await confirmar({
-          titulo: `Depositar em "${metaAchada.name}"?`,
-          texto: `Entendi "${frase}" como um depósito de ${brl(valor)}. Se não é isso, cancele e lance manualmente.`,
-          ok: 'Depositar',
-        });
-        if (ok) {
-          await commit((d) => {
-            const alvo = d.goals.find((g) => g.id === metaAchada.id);
-            if (alvo) alvo.savedCents = Math.max(0, alvo.savedCents + valor);
-          });
-          toast(`${metaAchada.name}: ${brl(metaAchada.savedCents + valor)} guardado.`);
-        }
-        return;
-      }
-    }
-
-    if (lido.needs.length) {
-      toast(`Faltou ${lido.needs.join(' e ')} — completa aí embaixo.`);
-    }
-    await editarLancamento(null, {
-      description: lido.description || '',
-      amountCents: lido.amountCents ?? 0,
-      date: lido.date,
-      categoryId: lido.categoryId || '',
-      count: lido.installmentCount || 1,
-      method: lido.method,
-    });
+    await interpretarFrase(frase);
   },
 
   async categorizar({ id }) {
@@ -1225,6 +1181,7 @@ async function editarDivida(id) {
     taxa: d0 ? String((d0.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
     minimoPct: d0?.minPaymentRate ? String((d0.minPaymentRate * 100).toFixed(0)) : '',
     minimoFixo: d0?.minPaymentCents || 0,
+    dueDay: d0?.dueDay || 10,
     cardId: d0?.cardId || '',
     bloqueado: !!d0?.cardBlocked,
     acordo: !!d0?.agreement,
@@ -1255,6 +1212,8 @@ async function editarDivida(id) {
         { name: 'minimoPct', label: 'Mínimo: quantos POR CENTO do saldo', type: 'percent', value: atual.minimoPct,
           hint: 'só o número, sem R$. Cartão costuma exigir 15. Se o seu mínimo é um valor fixo em reais, deixe vazio e use o campo abaixo' },
         { name: 'minimoFixo', label: 'Ou mínimo fixo por mês, em reais', type: 'money', value: atual.minimoFixo },
+        { name: 'dueDay', label: 'Vence todo dia', type: 'number', value: atual.dueDay, min: 1, max: 28,
+          hint: 'o dia em que a parcela sai da conta. É isto que a projeção de caixa usa' },
         { name: 'acordo', label: 'Já negociei um acordo pra essa dívida', type: 'checkbox', value: atual.acordo },
         { name: 'acordoForma', label: 'Forma de pagamento do acordo', type: 'segmento', value: atual.acordoForma,
           options: [{ value: 'avista', label: 'À vista' }, { value: 'parcelado', label: 'Parcelado' }] },
@@ -1317,6 +1276,7 @@ async function editarDivida(id) {
       monthlyRate: fezAcordo || r.kind === KIND.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
       minPaymentRate: fezAcordo ? 0 : pctParaFracao(r.minimoPct),
       minPaymentCents: fezAcordo ? Math.round(Math.abs(r.acordoValor) / parcelasAcordo) : r.minimoFixo,
+      dueDay: Math.min(28, Math.max(1, Number(r.dueDay) || 10)),
       cardId: r.cardId || null,
       cardBlocked: r.cardId ? !!r.bloqueado : false,
       agreement: fezAcordo ? { madeOn: d0?.agreement?.madeOn || app.todayISO, installments: parcelasAcordo, form: r.acordoForma } : null,
@@ -1486,6 +1446,168 @@ async function editarRecorrente(id, kind) {
   toast('Salvo.');
 }
 
+// ------------------------------------------------------------------- o Zé
+//
+// O Zé é o parser com nome. Ele não é IA nem manda nada para servidor nenhum —
+// é regra, dicionário e a memória do que VOCÊ já corrigiu. Por isso ele acerta
+// os seus estabelecimentos, e não os do Brasil inteiro: quanto mais você usa,
+// menos ele pergunta.
+
+/** Tudo que o Zé precisa saber deste cofre para acertar sozinho. */
+const contextoDoZe = () => ({
+  todayISO: app.todayISO,
+  merchants: MERCHANTS,
+  rules: app.doc.rules || [],
+  memory: app.doc.memory || {},
+  accounts: app.doc.accounts,
+  cards: app.doc.cards,
+});
+
+/** Só resume quando não sobrou nenhuma pergunta — senão o formulário é honesto. */
+const semDuvida = (l) =>
+  l.amountCents != null && l.description && (l.accountId || l.cardId) && l.categoryId;
+
+const sugestaoDe = (l) => ({
+  description: l.description || '',
+  amountCents: l.amountCents ?? 0,
+  date: l.date,
+  categoryId: l.categoryId || '',
+  count: l.installmentCount || 1,
+  method: l.method,
+  entrada: l.direction === 'in',
+});
+
+const nomeDaOrigem = (l) => {
+  if (l.cardId) return app.doc.cards.find((c) => c.id === l.cardId)?.name || 'cartão';
+  if (l.accountId) return app.doc.accounts.find((a) => a.id === l.accountId)?.name || 'conta';
+  return 'sem origem';
+};
+
+/** A frase chegou — o Zé decide o que fazer com ela. */
+async function interpretarFrase(frase) {
+  if (await tentarCofrinho(frase)) return;
+
+  const partes = splitEntries(frase);
+  if (partes.length > 1) return confirmarVarias(partes);
+
+  const lido = parseEntry(frase, contextoDoZe());
+  if (semDuvida(lido)) return confirmarUma(lido);
+
+  if (lido.needs.length) toast(`Faltou ${lido.needs.join(' e ')} — completa aí embaixo.`);
+  await editarLancamento(null, sugestaoDe(lido));
+}
+
+/**
+ * "Coloquei 35 no cofrinho da viagem" não é gasto — é depósito.
+ * Devolve true quando tratou a frase, para o resto do fluxo não rodar.
+ */
+async function tentarCofrinho(frase) {
+  const normFrase = frase.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  if (!/cofrinho|cofre|meta\b/.test(normFrase)) return false;
+
+  const lido = parseEntry(frase, contextoDoZe());
+  if (lido.amountCents == null) return false;
+
+  const meta = app.doc.goals.find((g) => {
+    const nome = g.name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    return nome.length > 2 && normFrase.includes(nome);
+  });
+  if (!meta) return false;
+
+  const valor = Math.abs(lido.amountCents);
+  const ok = await confirmar({
+    titulo: `Depositar em "${meta.name}"?`,
+    texto: `O Zé entendeu "${frase}" como um depósito de ${brl(valor)}. Se não é isso, cancele e lance manualmente.`,
+    ok: 'Depositar',
+  });
+  if (ok) {
+    await commit((d) => {
+      const alvo = d.goals.find((g) => g.id === meta.id);
+      if (alvo) alvo.savedCents = Math.max(0, alvo.savedCents + valor);
+    });
+    toast(`${meta.name}: ${brl(meta.savedCents + valor)} guardado.`);
+  }
+  return true;
+}
+
+/** Nada em aberto: mostra o resumo com um botão em vez do formulário inteiro. */
+async function confirmarUma(lido) {
+  const categoria = app.doc.categories.find((c) => c.id === lido.categoryId);
+  const r = await sheet(
+    `<h4>O Zé entendeu</h4>
+     <div class="ze-resumo">
+       <div class="ze-valor num ${lido.amountCents > 0 ? 'pos' : ''}">${esc(brl(lido.amountCents))}</div>
+       <div class="ze-desc">${esc(lido.description)}</div>
+       <div class="ze-meta">${esc(categoria?.name || 'sem categoria')} · ${esc(nomeDaOrigem(lido))} · ${esc(formatShort(lido.date))}</div>
+     </div>
+     <div class="btns"><button class="btn primary" data-ok="1">Lançar</button>
+       <button class="btn ghost" data-ajustar="1">Ajustar</button></div>`,
+    {
+      onMount: (card, fechar) => {
+        card.querySelector('[data-ok]').onclick = () => fechar('ok');
+        card.querySelector('[data-ajustar]').onclick = () => fechar('ajustar');
+      },
+    }
+  );
+  if (r === 'ok') return salvarDireto(lido);
+  if (r === 'ajustar') return editarLancamento(null, sugestaoDe(lido));
+}
+
+/** Duas ou mais compras na mesma frase — sempre confirma antes, nunca salva sozinho. */
+async function confirmarVarias(partes) {
+  const lidos = partes.map((p) => parseEntry(p, contextoDoZe()));
+  const total = sum(lidos.map((l) => Math.abs(l.amountCents || 0)));
+
+  const r = await sheet(
+    `<h4>O Zé achou ${lidos.length} lançamentos</h4>
+     <p class="sub">Confira antes de lançar — ${esc(brl(total))} no total.</p>
+     <div class="list">${lidos.map((l) => `
+       <div class="row">
+         <div class="bd"><div class="t">${esc(l.description || l.raw)}</div>
+           <div class="s">${esc(nomeDaOrigem(l))} · ${esc(formatShort(l.date))}</div></div>
+         <div class="rt"><div class="amt num">${esc(brl(l.amountCents || 0))}</div></div>
+       </div>`).join('')}</div>
+     <div class="btns"><button class="btn primary" data-ok="1">Lançar os ${lidos.length}</button>
+       <button class="btn ghost" data-x="1">Cancelar</button></div>`,
+    {
+      onMount: (card, fechar) => {
+        card.querySelector('[data-ok]').onclick = () => fechar('ok');
+        card.querySelector('[data-x]').onclick = () => fechar(null);
+      },
+    }
+  );
+  if (r !== 'ok') return;
+
+  for (const l of lidos) await salvarDireto(l, { silencioso: true });
+  toast(`${lidos.length} lançamentos registrados.`);
+}
+
+/** Grava sem passar pelo formulário. Só para o que o Zé leu inteiro. */
+async function salvarDireto(lido, { silencioso = false } = {}) {
+  const registro = {
+    id: novoId('tx'),
+    date: lido.date,
+    competence: monthKey(lido.date),
+    description: lido.description || lido.raw || 'Lançamento',
+    amountCents: lido.amountCents,
+    categoryId: lido.categoryId || null,
+    cardId: lido.cardId || null,
+    accountId: lido.accountId || null,
+    method: lido.method || (lido.cardId ? 'credit' : null),
+  };
+
+  if (lido.cardId) {
+    const card = app.doc.cards.find((c) => c.id === lido.cardId);
+    const { cycleFor } = await import('../core/statements.js');
+    const ciclo = cycleFor(card, lido.date);
+    registro.cycleId = ciclo.id;
+    registro.dueDate = ciclo.dueDate;
+  }
+
+  await commit((d) => { d.transactions = [registro, ...d.transactions]; });
+  if (!silencioso) toast('Lançado.');
+}
+
 /**
  * A folha do lançamento por frase.
  *
@@ -1508,7 +1630,7 @@ function pedirFrase() {
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   return sheet(
-    `<h4>Lançar por frase</h4>
+    `<h4>Fala com o Zé</h4>
      <p class="sub">Segure o botão e fale como você falaria: "gastei 85 no mercado ontem",
        "45,90 no posto no crédito em 3x", "recebi 300 do trader". Solte quando terminar.</p>
      <div class="field">

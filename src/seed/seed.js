@@ -44,12 +44,12 @@ export function seedDocument(todayISO = '2026-08-19') {
     {
       id: 'dv-rot', name: 'Fatura atrasada · Nubank', kind: KIND.REVOLVING,
       balanceCents: 648000, monthlyRate: 0.149, minPaymentRate: 0.15,
-      cardId: 'nu', since: '2026-07-27',
+      cardId: 'nu', dueDay: 27, since: '2026-07-27',
     },
     {
       id: 'dv-che', name: 'Cheque especial · Itaú', kind: KIND.OVERDRAFT,
       balanceCents: 320000, monthlyRate: 0.08, minPaymentCents: 0,
-      accountId: 'ac-it', since: '2026-06-10',
+      accountId: 'ac-it', dueDay: 10, since: '2026-06-10',
     },
   ];
 

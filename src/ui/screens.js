@@ -124,10 +124,16 @@ export function render(app) {
   }
 
   const tela = TELAS[app.screen] || TELAS.painel;
+  // O Painel já tem a barra do Zé em destaque; nas outras telas ele vira botão
+  // flutuante, para lançar de onde você estiver sem voltar pro começo.
+  const fab = app.screen === 'painel' ? '' :
+    `<button class="ze-fab" data-act="falar" aria-label="Falar com o Zé">${icon('microfone')}</button>`;
+
   document.getElementById('app').innerHTML = `
     ${faixaAtualizacao(app)}
     ${faixaExemplo(app)}
     <div class="screens"><section class="screen active">${tela(app)}</section></div>
+    ${fab}
     ${tabbar(app.screen)}
   `;
   wire(app);
@@ -241,9 +247,13 @@ function painel(app) {
   ${guia}
   ${backup}
 
-  <div class="quick">
+  <button class="ze-barra" data-act="falar">
+    <span class="ze-mic">${icon('microfone')}</span>
+    <span class="ze-txt">Fala aí, o Zé tá ouvindo</span>
+  </button>
+
+  <div class="quick tres">
     <button class="qa" data-act="novo"><div class="ic">${icon('mais')}</div><span>Lançar</span></button>
-    <button class="qa" data-act="falar"><div class="ic">${icon('microfone')}</div><span>Por frase</span></button>
     <button class="qa" data-go="faturas"><div class="ic">${icon('cartao')}</div><span>Fatura</span></button>
     <button class="qa" data-go="revisao"><div class="ic">${icon('lista')}</div><span>Revisão${v.revisao.length ? ` ${v.revisao.length}` : ''}</span></button>
   </div>
@@ -1311,7 +1321,7 @@ function guia(app) {
       </div>`).join(''))}
 
   ${bloco('Todo dia', '5 segundos',
-    rotina('Lançar o gasto na hora', 'no Painel · botão Lançar, ou Por frase e escrever "gastei 85 no mercado ontem"') +
+    rotina('Lançar o gasto na hora', 'no Painel · fale com o Zé: "gastei 85 no mercado ontem"') +
     rotina('Não deixe acumular', 'lançar depois de uma semana é quando as pessoas desistem do app'))}
 
   ${bloco('Toda semana', '3 minutos',

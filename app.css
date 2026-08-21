@@ -151,7 +151,39 @@ body {
 .nudge i { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
 
 /* ---------- ações rápidas ---------- */
+/* ---------- o Zé ---------- */
+.ze-barra {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 18px;
+  padding: 15px 17px; border-radius: 100px; cursor: pointer; font: inherit; text-align: left;
+  background: var(--hero); border: 0; color: #fff; box-shadow: var(--sh-md);
+  transition: transform .1s ease;
+}
+.ze-barra:active { transform: scale(.985); }
+.ze-mic {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  background: var(--jade); display: flex; align-items: center; justify-content: center;
+}
+.ze-mic svg { width: 17px; height: 17px; stroke: var(--on-jade); stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.ze-txt { font-size: 14px; font-weight: 500; color: rgba(255,255,255,.92); }
+
+.ze-fab {
+  position: fixed; right: 18px; bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  width: 56px; height: 56px; border-radius: 50%; border: 0; z-index: 60; cursor: pointer;
+  background: var(--jade); color: var(--on-jade); display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 0 rgba(0,0,0,.18), 0 8px 20px rgba(0,0,0,.3);
+  transition: transform .1s ease, box-shadow .1s ease;
+}
+.ze-fab:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.18), 0 3px 8px rgba(0,0,0,.25); }
+.ze-fab svg { width: 24px; height: 24px; stroke: currentColor; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+.ze-resumo { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px; margin-bottom: 16px; }
+.ze-valor { font-size: 26px; font-weight: 600; letter-spacing: -.02em; color: var(--red); }
+.ze-valor.pos { color: var(--jade); }
+.ze-desc { font-size: 14px; color: var(--ink); margin-top: 6px; }
+.ze-meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+
 .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-top: 18px; }
+.quick.tres { grid-template-columns: repeat(3, 1fr); }
 .qa {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
   padding: 13px 5px 11px; display: flex; flex-direction: column; align-items: center; gap: 7px;

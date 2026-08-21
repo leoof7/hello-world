@@ -5,6 +5,7 @@
 
 import { toCents } from './money.js';
 import { today, addDays, parts, iso, clampedDay } from './dates.js';
+import { categorize } from './categorize.js';
 
 const UNIDADES = {
   zero: 0, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5,
@@ -110,6 +111,21 @@ const isoToArgs = (s) => {
   return [y, m - 1, d];
 };
 
+/**
+ * Apaga os trechos de data do texto.
+ *
+ * Cada extrator lê a frase inteira por conta própria, e o de valor pega o
+ * PRIMEIRO número que encontra. Sem isto, "dia 12 gastei 50" virava R$ 12,00
+ * e "12/08 paguei 200" virava R$ 12,00 — errado por quatro vezes, calado, num
+ * app cuja função é dizer quanto você deve. A data é lida antes e apagada
+ * daqui para a frente, para que só sobre número que é dinheiro.
+ */
+export function maskDates(text) {
+  return String(text || '')
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, ' ')
+    .replace(/\bdia\s+\d{1,2}\b/gi, ' ');
+}
+
 /** Forma de pagamento. */
 export function extractMethod(text) {
   const t = norm(text);
@@ -141,6 +157,66 @@ export function extractDirection(text) {
   return 'out';
 }
 
+/**
+ * De onde saiu: acha o nome de uma conta ou cartão dentro da frase.
+ *
+ * Os nomes vêm do que a pessoa cadastrou, então isto já nasce personalizado —
+ * "no nubank" só resolve para quem tem um Nubank. Nome com até dois caracteres
+ * é ignorado de propósito: "PP" ou "Nu" casariam com meia frase.
+ *
+ * Cartão vence conta quando os dois batem, porque dizer o nome do banco numa
+ * compra quase sempre quer dizer o cartão. A exceção é falar "débito": aí o
+ * dinheiro sai da conta ligada àquele cartão, não da fatura.
+ */
+export function extractOrigin(text, { accounts = [], cards = [], method = null } = {}) {
+  const t = norm(text);
+  const achar = (lista) => lista.find((x) => {
+    const nome = norm(x.name);
+    return nome.length > 2 && t.includes(nome);
+  });
+
+  const cartao = achar(cards);
+  if (cartao) {
+    if (method === 'debit' && cartao.accountId) {
+      return { accountId: cartao.accountId, cardId: null, matched: cartao.name };
+    }
+    return { accountId: null, cardId: cartao.id, matched: cartao.name };
+  }
+
+  const conta = achar(accounts);
+  if (conta) return { accountId: conta.id, cardId: null, matched: conta.name };
+  return null;
+}
+
+/**
+ * "gastei 50 no mercado e 30 na farmácia" → duas frases.
+ *
+ * Divide só quando sobram DOIS valores de verdade. Sem essa trava, "50 no
+ * mercado e farmácia" (uma compra) viraria dois lançamentos errados — e dois
+ * lançamentos errados são piores que um.
+ *
+ * "oitenta e cinco" e "85 reais e 50 centavos" são um número só: o "e" deles é
+ * protegido antes da divisão, senão o próprio valor seria partido ao meio.
+ */
+export function splitEntries(text) {
+  const original = String(text || '');
+  const numeros = Object.keys(UNIDADES).join('|');
+
+  // Divide no "e" — menos quando o que vem depois é a segunda metade de um
+  // número ("oitenta E cinco", "85 reais E 50 centavos"). Na dúvida não
+  // divide: uma frase inteira mal lida é melhor que duas frases erradas.
+  const separador = new RegExp(
+    '\\s+e\\s+(?!(?:' + numeros + ')\\b|\\d+\\s*centavos?\\b)|\\s*;\\s*',
+    'i',
+  );
+
+  const partes = original.split(separador).map((p) => p.trim()).filter(Boolean);
+  if (partes.length < 2) return [original];
+
+  const comValor = partes.filter((p) => extractAmount(maskDates(p)) != null);
+  return comValor.length >= 2 ? comValor : [original];
+}
+
 /** Sobra do texto depois de tirar valor, data e forma — vira a descrição. */
 export function extractDescription(text, merchants = []) {
   const t = norm(text);
@@ -165,21 +241,33 @@ export function extractDescription(text, merchants = []) {
 /**
  * Interpreta a frase inteira.
  * Devolve null em amountCents quando não achou valor — aí a UI pergunta.
+ *
+ * A categoria NÃO é decidida aqui: quem decide é `categorize`, o mesmo caminho
+ * que o extrato importado usa. Antes esta função tinha a própria busca no
+ * dicionário, pior e paralela — só olhava o dicionário embutido e ignorava
+ * regra e memória. Resultado: você podia corrigir "Zaffari → Mercado" na
+ * Revisão cinquenta vezes que a frase falada continuava sem saber. Agora o que
+ * você ensina uma vez vale para os dois caminhos.
  */
-export function parseEntry(text, { todayISO = today(), merchants = [], categories = [] } = {}) {
-  const amountCents = extractAmount(text);
+export function parseEntry(text, { todayISO = today(), merchants = [], rules = [], memory = {}, accounts = [], cards = [] } = {}) {
+  const date = extractDate(text, todayISO);
+  // A data sai de cena antes do valor: senão "dia 12 gastei 50" vira R$ 12.
+  const semData = maskDates(text);
+
+  const amountCents = extractAmount(semData);
   const direction = extractDirection(text);
   const method = extractMethod(text);
   const count = extractInstallments(text);
-  const date = extractDate(text, todayISO);
-  const description = extractDescription(text, merchants);
+  const origem = extractOrigin(text, { accounts, cards, method });
 
-  // categoria pelo dicionário, se o comércio foi reconhecido
-  let categoryId = null;
-  const t = norm(text);
-  for (const m of merchants) {
-    if (m.match && t.includes(norm(m.match))) { categoryId = m.categoryId; break; }
-  }
+  // O nome do banco não é descrição: "no nubank no mercado" é compra no
+  // Mercado, paga no Nubank — não uma compra chamada "Nubank Mercado".
+  const semOrigem = origem ? apagarTrecho(semData, origem.matched) : semData;
+  const description = extractDescription(semOrigem, merchants);
+
+  const cat = description
+    ? categorize({ description, method }, { rules, memory, merchants })
+    : { categoryId: null, source: null, confidence: 0 };
 
   return {
     raw: text,
@@ -188,11 +276,32 @@ export function parseEntry(text, { todayISO = today(), merchants = [], categorie
     method: method || (count > 1 ? 'credit' : null),
     installmentCount: count,
     description,
-    categoryId,
+    categoryId: cat.categoryId,
+    categorySource: cat.source,
+    confidence: cat.confidence,
+    accountId: origem?.accountId || null,
+    cardId: origem?.cardId || null,
     direction,
     needs: [
       amountCents == null ? 'valor' : null,
       description == null ? 'descrição' : null,
     ].filter(Boolean),
   };
+}
+
+/** Tira um trecho do texto sem depender de acento ou caixa. */
+function apagarTrecho(text, trecho) {
+  if (!trecho) return text;
+  const alvo = norm(trecho);
+  const palavras = String(text).split(/(\s+)/);
+  let restante = alvo.split(/\s+/).length;
+  return palavras
+    .filter((p) => {
+      if (restante <= 0 || !p.trim()) return true;
+      if (alvo.includes(norm(p))) { restante--; return false; }
+      return true;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

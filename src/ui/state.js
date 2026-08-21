@@ -336,7 +336,11 @@ function minimosAgendados(debts, todayISO) {
   for (const d of debts) {
     const minimo = minimumOf(d);
     if (minimo <= 0) continue;
-    const dia = Number((d.since || todayISO).slice(8, 10)) || 10;
+    // O dia do vencimento é o que a pessoa informou. Antes isto usava `since`
+    // — a data em que a dívida foi CADASTRADA — como se fosse o dia de pagar.
+    // Quem cadastrasse hoje via o app anunciar "sua conta fica negativa hoje",
+    // com uma saída que não existia: o app tinha inventado a data.
+    const dia = Number(d.dueDay) || 10;
     for (let i = 0; i < 4; i++) {
       const mes = addMonthKey(monthKey(todayISO), i);
       const data = `${mes}-${String(Math.min(dia, 28)).padStart(2, '0')}`;
