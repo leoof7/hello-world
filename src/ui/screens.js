@@ -8,6 +8,7 @@ import { brl, brlShort, formatCents, percent, sum } from '../core/money.js';
 import { formatShort, formatLong, formatMonthKey, monthAbbr, addMonthKey, parts, daysBetween } from '../core/dates.js';
 import { KIND, horizon, comparePlans } from '../core/debts.js';
 import { monthsToGoal, monthlyYield } from '../core/goals.js';
+import { avisosLigados } from '../data/avisos.js';
 import { backupMessage } from '../data/backup.js';
 import { esc, icon, sparkline } from './dom.js';
 import { wire } from './actions.js';
@@ -248,13 +249,23 @@ function painel(app) {
   ${guia}
   ${backup}
 
+  ${v.avisos.length ? `<div class="sec" style="margin-top:16px">
+    ${v.avisos.map((a) => `
+      <button class="nudge ${a.urgencia >= 90 ? 'crit' : ''}" data-go="${esc(a.tela)}" style="width:100%;margin-bottom:8px">
+        <span class="ic">${icon(a.urgencia >= 90 ? 'alerta' : 'sino')}</span>
+        <div><b>${esc(a.titulo)}</b><i>${esc(a.texto)}</i></div>
+        <span class="arr">${icon('seta')}</span>
+      </button>`).join('')}
+  </div>` : ''}
+
   <button class="ze-barra" data-act="falar">
     <span class="ze-mic">${icon('microfone')}</span>
     <span class="ze-txt">Fala aí, o Zé tá ouvindo</span>
   </button>
 
-  <div class="quick tres">
+  <div class="quick">
     <button class="qa" data-act="novo"><div class="ic">${icon('mais')}</div><span>Lançar</span></button>
+    <button class="qa" data-act="simular"><div class="ic">${icon('ajuda')}</div><span>Posso?</span></button>
     <button class="qa" data-go="faturas"><div class="ic">${icon('cartao')}</div><span>Fatura</span></button>
     <button class="qa" data-go="revisao"><div class="ic">${icon('lista')}</div><span>Revisão${v.revisao.length ? ` ${v.revisao.length}` : ''}</span></button>
   </div>
@@ -876,6 +887,22 @@ function analise(app) {
 
   <div class="bloco-titulo">Este mês</div>
 
+  ${v.comparativo.length ? `
+  <div class="sec" style="margin-top:0">
+    <div class="sh"><h3>Você contra você</h3><a>comparado com a sua média</a></div>
+    <div class="list">${v.comparativo.slice(0, 5).map((c) => `
+      <div class="row">
+        <div class="ic ${c.direction === 'acima' ? 'r' : 'j'}">${icon(c.direction === 'acima' ? 'cima' : 'baixo')}</div>
+        <div class="bd"><div class="t">${esc(c.name)}</div>
+          <div class="s">${percent(Math.abs(c.ratio), 0)} ${c.direction} do seu ritmo · média ${m(c.averageCents, brlShort)}/mês</div></div>
+        <div class="rt"><div class="amt num ${c.direction === 'acima' ? 'neg' : 'pos'}">${m(c.spentCents, brlShort)}</div>
+          <div class="dt">esperado ${m(c.expectedCents, brlShort)}</div></div>
+      </div>`).join('')}</div>
+    <p class="empty" style="padding:12px 4px 0;text-align:left;font-size:11.5px">
+      O esperado é proporcional ao dia de hoje — no dia 15 já deveria ter saído metade do mês.
+    </p>
+  </div>` : ''}
+
   ${v.orcamentoVariavel.length ? `
   <div class="sec">
     <div class="sh"><h3>Tetos do mês</h3><a data-act="tetos">Ajustar</a></div>
@@ -1080,11 +1107,24 @@ function tudo(app) {
     <div class="list">
       ${item('perfil', 'engrenagem', 'Seu nome e renda', esc(app.doc.profile.name || 'não preenchido'))}
       ${item('tema', 'lua', 'Tema', app.doc.settings.theme === 'auto' ? 'segue o sistema' : app.doc.settings.theme === 'dark' ? 'escuro' : 'claro')}
+      ${item('avisos', 'sino', 'Avisos', avisosLigados()
+        ? 'ligados · o app te avisa ao abrir'
+        : 'desligados · nada te procura')}
       ${item('limpar', 'lista', app.doc.profile?.demo ? 'Sair do exemplo e começar do zero' : 'Limpar os dados',
         'zera os lançamentos e mantém suas doze palavras', 'a')}
       ${item('apagar', 'x', 'Apagar tudo, inclusive o cofre', 'refaz as doze palavras do começo', 'r')}
     </div>
   </div>
+
+  ${v.marcos.length ? `
+  <div class="sec">
+    <div class="sh"><h3>Conquistas</h3><a>${v.marcos.length}</a></div>
+    <div class="list">${v.marcos.map((mc) => `
+      <div class="row">
+        <div class="ic j">${icon('check')}</div>
+        <div class="bd"><div class="t">${esc(mc.titulo)}</div><div class="s">${esc(mc.texto)}</div></div>
+      </div>`).join('')}</div>
+  </div>` : ''}
 
   <p class="empty" style="font-size:11px;text-align:center;padding:24px 20px 0">
     Zero ${esc(app.doc.version ? `· documento v${app.doc.version}` : '')}<br>

@@ -14,6 +14,7 @@ import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js'
 import { scan } from '../core/leaks.js';
 import { diagnose } from '../core/health.js';
 import { monthlySpend, dailyNet, worstDay, NEUTRAS } from '../core/history.js';
+import { versusMedia, avisosDoDia, marcos } from '../core/insights.js';
 import { categorizeAll } from '../core/categorize.js';
 import { MERCHANTS } from '../seed/categories.js';
 import { PADROES } from '../config.js';
@@ -138,6 +139,9 @@ export function derive(doc, todayISO = today()) {
   const { dias: calendarioDias, primeiroDiaSemana } = dailyNet(doc.transactions, mes);
   const piorDiaMes = worstDay(calendarioDias);
 
+  // ---- o que o app tem a dizer sem ser perguntado ----
+  const comparativo = versusMedia(doc.transactions, categorias, todayISO);
+
   // ---- vazamentos e diagnóstico ----
   const vazamentos = scan(doc.transactions, todayISO);
   const saude = diagnose({
@@ -226,6 +230,24 @@ export function derive(doc, todayISO = today()) {
     revisao,
     lancamentos: [...doc.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 12),
     guia: guiaStatus(doc),
+    comparativo,
+    // Os avisos precisam da projeção e das faturas já prontas, por isso saem
+    // daqui de baixo e não lá de cima.
+    avisos: avisosDoDia({
+      projecao,
+      faturas: faturas.futuras.filter((s) => !pagas.has(`${s.cardId}|${s.cycleId}`)),
+      vazamentos,
+      revisaoCount: revisao.length,
+      backupDiasSem: null,
+      todayISO,
+    }),
+    marcos: marcos({
+      dividaTotalCents,
+      dividaPicoCents: picoCents,
+      reservaMeses: saude.emergency.months,
+      faturasPagas: (doc.faturasPagas || []).length,
+      categorizados: Object.keys(doc.memory || {}).length,
+    }),
   };
 }
 

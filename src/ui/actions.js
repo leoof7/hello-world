@@ -11,6 +11,8 @@ import { parseEntry, splitEntries } from '../core/parse.js';
 import { expand } from '../core/installments.js';
 import { learn } from '../core/categorize.js';
 import { KIND, validateDebt } from '../core/debts.js';
+import { podeComprar, custoDoHabito } from '../core/insights.js';
+import * as avisos from '../data/avisos.js';
 import { MERCHANTS } from '../seed/categories.js';
 import * as db from '../data/db.js';
 import { buildBackup, readBackup, deliver, backupFilename, backupStatus, markDone, readFile } from '../data/backup.js';
@@ -399,6 +401,95 @@ const ACOES = {
     toast(app.view.revisao.length
       ? `${feitos} categorizado${feitos === 1 ? '' : 's'} · faltam ${app.view.revisao.length}`
       : 'Fila vazia — tudo categorizado.');
+  },
+
+  /**
+   * "Posso comprar isso?" — a pergunta que o app tinha tudo para responder e
+   * não respondia. Projeção, limite e reserva já existiam; faltava juntar.
+   */
+  async simular() {
+    const opcoes = [
+      { value: 'ac', label: 'À vista, da conta' },
+      ...app.doc.cards.map((c) => ({ value: `cd:${c.id}`, label: `No ${c.name}` })),
+    ];
+
+    const r = await form('Posso comprar isso?',
+      'O app já sabe seu saldo, sua projeção e seu limite. Diz aí o que você quer comprar.',
+      [
+        { name: 'valor', label: 'Quanto custa', type: 'money', value: 0 },
+        { name: 'como', label: 'Como pagaria', type: 'select', value: opcoes[0]?.value, options: opcoes },
+        { name: 'parcelas', label: 'Em quantas vezes', type: 'number', value: 1, min: 1, max: 24 },
+      ], { ok: 'Consultar' });
+    if (!r?.valor) return;
+
+    const cartaoId = r.como.startsWith('cd:') ? r.como.slice(3) : null;
+    const cartao = cartaoId ? app.view.cartoes.find((c) => c.id === cartaoId) : null;
+    const veredito = podeComprar({
+      valorCents: r.valor,
+      parcelas: cartao ? r.parcelas : 1,
+      projecao: app.view.projecao,
+      cartao,
+      saldoCents: app.view.saldoCents,
+      reservaCents: app.view.reservaCents,
+      todayISO: app.todayISO,
+    });
+
+    const cabe = cartao ? veredito.parcelado.cabe : veredito.aVista.cabe;
+    const linhas = cartao
+      ? [
+          ['Parcela', `${r.parcelas}x de ${brl(veredito.parcelaCents)}`],
+          ['Limite livre', brl(cartao.availableCents)],
+          ['Depois da compra', brl(Math.max(0, cartao.availableCents - r.valor))],
+        ]
+      : [
+          ['Saldo hoje', brl(app.view.saldoCents)],
+          ['Depois da compra', brl(veredito.aVista.saldoDepoisCents)],
+          ['Pior dia dos 90', brl(veredito.aVista.piorDiaDepoisCents)],
+        ];
+
+    await sheet(
+      `<h4>${cabe ? 'Cabe' : 'Não cabe'}</h4>
+       <p class="sub">${cabe
+        ? 'Pelos seus números, essa compra passa sem te deixar no vermelho.'
+        : esc(veredito.motivos[0] ? `Não cabe porque ${veredito.motivos[0]}.` : 'Essa compra te deixa negativo.')}</p>
+       <div class="ze-resumo">
+         ${linhas.map(([rotulo, valor]) => `<div class="ft" style="margin:0 0 6px">
+           <span style="font-size:11.5px;color:var(--muted)">${esc(rotulo)}</span>
+           <span class="num" style="font-size:13px">${esc(valor)}</span></div>`).join('')}
+       </div>
+       ${!cabe && veredito.motivos.length > 1 ? `<p class="sub">${esc(veredito.motivos.slice(1).join(' · '))}</p>` : ''}
+       <div class="btns"><button class="btn ${cabe ? 'primary' : 'ghost'}" data-x="1" style="width:100%">Entendi</button></div>`,
+      { onMount: (card, fechar) => { card.querySelector('[data-x]').onclick = () => fechar(null); } }
+    );
+  },
+
+  /** Liga ou desliga os avisos. A permissão só pode ser pedida a partir daqui. */
+  async avisos() {
+    if (!avisos.suportaAvisos()) {
+      toast('Este navegador não sabe notificar.');
+      return;
+    }
+
+    if (avisos.avisosLigados()) {
+      avisos.ligarAvisos(false);
+      avisos.limparVistos();
+      draw();
+      toast('Avisos desligados.');
+      return;
+    }
+
+    const permissao = await avisos.pedirPermissao();
+    if (permissao !== 'granted') {
+      toast(permissao === 'denied'
+        ? 'Você negou os avisos. Para religar, é nas configurações do aparelho.'
+        : 'Sem permissão, sem aviso.');
+      return;
+    }
+
+    avisos.ligarAvisos(true);
+    draw();
+    const quantos = await avisos.mostrarAvisos(app.view.avisos, app.todayISO);
+    toast(quantos ? 'Avisos ligados.' : 'Avisos ligados — nada urgente hoje.');
   },
 
   // ---- antes de começar ----
