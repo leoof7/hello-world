@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   hexParaRgb, luminancia, textoSobre, ajustar, paletaDe, CORES,
   misturar, heroDe, comAlfa, superficiesTingidas,
@@ -164,4 +165,53 @@ test('o herói fica escuro o bastante para texto branco em qualquer cor', () => 
 test('comAlfa vira rgba e aguenta hex inválido', () => {
   assert.equal(comAlfa('#0a7b5a', 0.3), 'rgba(10,123,90,0.3)');
   assert.match(comAlfa('nada', 0.3), /^rgba\(/);
+});
+
+// ------------------------------ a cor do app não repinta o que é semântico
+//
+// O bug que isto trava: --jade servia de "cor do app" E de "dinheiro que
+// entra". Escolher vermelho como cor deixava o valor POSITIVO vermelho, e o
+// par verde/vermelho — a convenção que todo mundo lê sem pensar — sumia.
+// Valor positivo em vermelho é o app mentindo com cor.
+
+test('os tokens que aplicarCor mexe não incluem os semânticos', () => {
+  const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
+  // aplicarCor escreve --jade, --jade-2, --on-jade, --jade-soft, as superfícies
+  // e o herói. --positivo e --negativo não podem estar nessa lista.
+  const tema = readFileSync(new URL('../src/ui/tema.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(tema, /setProperty\(\s*'--positivo/, 'positivo não segue a cor escolhida');
+  assert.doesNotMatch(tema, /setProperty\(\s*'--negativo/, 'negativo não segue a cor escolhida');
+  assert.match(css, /--positivo:/, 'e o token existe de verdade');
+  assert.match(css, /--negativo:/);
+});
+
+test('valor positivo e negativo usam os tokens semânticos, não a cor do app', () => {
+  const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.row \.amt\.pos \{ color: var\(--positivo\); \}/);
+  assert.match(css, /\.row \.amt\.neg \{ color: var\(--negativo\); \}/);
+});
+
+test('os tokens semânticos existem nos dois temas', () => {
+  const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
+  assert.equal((css.match(/--positivo:/g) || []).length, 3, 'claro, media escura e data-theme escuro');
+  assert.equal((css.match(/--negativo:/g) || []).length, 3);
+});
+
+test('positivo é verde de verdade e negativo é vermelho de verdade', () => {
+  // Luminância NÃO serve para medir isto: verde e vermelho da mesma escuridão
+  // têm luminância quase igual — 0.001 de diferença, no caso destes dois. Esse
+  // é justamente o par que quem tem daltonismo vermelho-verde não distingue.
+  // O que dá para garantir aqui é o canal dominante; quem carrega o sentido
+  // para quem não enxerga a diferença é o SINAL, testado logo abaixo.
+  const verde = hexParaRgb('#2f6b4a');
+  const vermelho = hexParaRgb('#a63b32');
+  assert.ok(verde.g > verde.r, 'o positivo tem que puxar para o verde');
+  assert.ok(vermelho.r > vermelho.g, 'o negativo tem que puxar para o vermelho');
+});
+
+test('a cor não é o único sinal de entrada e saída', () => {
+  // Se a cor fosse o único canal, o app seria ilegível para uma em cada doze
+  // pessoas. O sinal na frente do valor é o que sustenta o sentido sem cor.
+  const screens = readFileSync(new URL('../src/ui/screens.js', import.meta.url), 'utf8');
+  assert.match(screens, /sign: true/, 'a lista mostra + e − no valor');
 });

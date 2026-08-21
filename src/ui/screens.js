@@ -35,8 +35,53 @@ const TITULOS = {
 
 let esconder = false;
 
+/**
+ * Privacidade por escopo.
+ *
+ * O olho do cabeçalho escondia tudo ou nada. Mas o que se quer esconder num
+ * ônibus quase nunca é tudo: é o saldo, ou é a lista de lançamentos, e não o
+ * teto de mercado. Agora cada bloco que mostra dinheiro tem o próprio olho, e
+ * o geral continua existindo por cima.
+ *
+ * A regra do "último apertado manda": tocar no geral define todos de uma vez;
+ * tocar num escopo muda só aquele, e passa a valer por cima do geral. Sem
+ * isso, esconder o saldo e depois mexer no geral devolveria o saldo à tela
+ * sem ninguém entender por quê.
+ */
+let escopos = {};
+
+const escondido = (escopo) => (escopo in escopos ? escopos[escopo] : esconder);
+
 /** Valor formatado, respeitando o olho fechado. */
 const m = (cents, fn = brl) => (esconder ? '••••' : fn(cents));
+
+/**
+ * Um valor com o olho do próprio escopo.
+ *
+ * O texto vem pronto de quem chama (já passou pelo `m`), então este helper não
+ * refaz formatação — ele só decide entre mostrar e mascarar, e desenha o olho.
+ */
+function olho(app, escopo, textoPronto, tag = 'span') {
+  const oculto = escondido(escopo);
+  return `<${tag} class="valor-olho">${oculto ? '••••' : textoPronto}</${tag}>`;
+}
+
+/** O botão de esconder de um bloco. Fica no cabeçalho dele, não no valor. */
+function botaoOlho(escopo) {
+  const oculto = escondido(escopo);
+  return `<button class="olho ${oculto ? 'off' : ''}" data-act="privacidade-escopo" data-v="${esc(escopo)}"
+    aria-label="${oculto ? 'Mostrar' : 'Esconder'} os valores deste bloco">${icon(oculto ? 'escudoOk' : 'escudo')}</button>`;
+}
+
+/** A foto de perfil, ou a inicial do nome quando não tem foto. */
+function avatar(app, tamanho = 'md') {
+  const foto = app.doc.profile?.foto;
+  const nome = app.doc.profile?.name || '';
+  const inicial = nome.trim()[0]?.toUpperCase() || 'Z';
+  return foto
+    ? `<img class="avatar av-${tamanho}" src="${esc(foto)}" alt="">`
+    : `<div class="avatar av-${tamanho} av-vazio">${esc(inicial)}</div>`;
+}
 
 // ==================================================== ANTES DE COMEÇAR
 //
@@ -73,7 +118,7 @@ function onboarding(app) {
   </div>
 
   <div style="height:6px;border-radius:100px;background:var(--line-2);overflow:hidden;margin:4px 0 22px">
-    <div style="height:100%;border-radius:100px;background:var(--jade);width:${(indice / PASSOS_OBRIGATORIOS.length) * 100}%"></div>
+    <div style="height:100%;border-radius:100px;background:var(--ouro);width:${(indice / PASSOS_OBRIGATORIOS.length) * 100}%"></div>
   </div>
 
   <div class="sec" style="margin-top:0"><div class="say">
@@ -112,6 +157,7 @@ function ofertaTour() {
 
 export function render(app) {
   esconder = app.privacy;
+  escopos = app.doc.settings?.privacidade || {};
 
   if (onboardingPendente(app.doc)) {
     document.getElementById('app').innerHTML = `
@@ -292,9 +338,17 @@ function painel(app) {
   ${header(app)}
 
   <div class="saudacao">
-    <div class="ola ser">${esc(saudacaoDoDia())}${app.doc.profile?.name ? `, ${esc(app.doc.profile.name)}` : ''}</div>
-    <div class="tem">Você tem <b>${m(v.saldoCents)}</b> nas contas agora</div>
+    ${avatar(app, 'md')}
+    <div class="saudacao-txt">
+      <div class="ola ser">${esc(saudacaoDoDia())}${app.doc.profile?.name ? `, ${esc(app.doc.profile.name)}` : ''}</div>
+      <div class="tem">Você tem ${olho(app, 'painel-saldo', m(v.saldoCents), 'b')} nas contas agora</div>
+    </div>
   </div>
+
+  <button class="ze-barra" data-act="falar">
+    <span class="ze-mic">${icon('microfone')}</span>
+    <span class="ze-txt">Fala aí, o Zé tá ouvindo?</span>
+  </button>
 
   <div class="quick">
     <button class="qa" data-act="novo"><div class="ic">${icon('mais')}</div><span>Lançar</span></button>
@@ -302,11 +356,6 @@ function painel(app) {
     <button class="qa" data-go="faturas"><div class="ic">${icon('cartao')}</div><span>Fatura</span></button>
     <button class="qa" data-go="revisao"><div class="ic">${icon('lista')}</div><span>Revisão${v.revisao.length ? ` ${v.revisao.length}` : ''}</span></button>
   </div>
-
-  <button class="ze-barra" data-act="falar">
-    <span class="ze-mic">${icon('microfone')}</span>
-    <span class="ze-txt">Fala aí, o Zé tá ouvindo</span>
-  </button>
 
   ${guia}
   ${backup}
@@ -317,14 +366,14 @@ function painel(app) {
 
   <div class="wrow">
     <div class="w">
-      <div class="t"><span class="l">Entra no mês</span><div class="ic">${icon('cima')}</div></div>
-      <div class="v num">${m(v.rendaFixaCents + v.extrasMesCents, brlShort)}</div>
+      <div class="t"><span class="l">Entra no mês</span>${botaoOlho('painel-entra')}<div class="ic">${icon('cima')}</div></div>
+      <div class="v num">${olho(app, 'painel-entra', m(v.rendaFixaCents + v.extrasMesCents, brlShort))}</div>
       <div class="s">${v.extrasMesCents ? `fixo + ${m(v.extrasMesCents, brlShort)} avulso` : 'salário e fixos'}</div>
-      <div class="mc">${sparkline(serieEntradas(v), { color: 'var(--jade)' })}</div>
+      <div class="mc">${sparkline(serieEntradas(v), { color: 'var(--positivo)' })}</div>
     </div>
     <div class="w">
-      <div class="t"><span class="l">${v.dividaTotalCents ? 'Juros por dia' : 'Sai no mês'}</span><div class="ic">${icon('baixo')}</div></div>
-      <div class="v num" style="color:var(--red)">${m(v.dividaTotalCents ? v.jurosDiaCents : v.fixosCents + v.parcelasDoMesCents, brlShort)}</div>
+      <div class="t"><span class="l">${v.dividaTotalCents ? 'Juros por dia' : 'Sai no mês'}</span>${botaoOlho('painel-sai')}<div class="ic">${icon('baixo')}</div></div>
+      <div class="v num" style="color:var(--negativo)">${olho(app, 'painel-sai', m(v.dividaTotalCents ? v.jurosDiaCents : v.fixosCents + v.parcelasDoMesCents, brlShort))}</div>
       <div class="s">${v.dividaTotalCents ? `${m(v.jurosMesCents, brlShort)} no mês` : `${m(v.parcelasDoMesCents, brlShort)} em parcelas`}</div>
       <div class="mc">${sparkline(serieSaldo(v), { color: 'var(--red)' })}</div>
     </div>
@@ -494,9 +543,9 @@ function balaoDoPlano(v) {
         <div class="p">São ${p.monthsCount} ${p.monthsCount === 1 ? 'mês' : 'meses'} pagando
           ${esc(brl(v.orcamentoDivida))}. Cada real a mais por mês antecipa essa data.</div>
         <svg class="plano-linha" viewBox="0 0 ${largura} ${altura}" preserveAspectRatio="none" aria-hidden="true">
-          <polyline points="${pontos.join(' ')}" fill="none" stroke="var(--jade)" stroke-width="2.2"
+          <polyline points="${pontos.join(' ')}" fill="none" stroke="var(--ouro)" stroke-width="2.2"
             stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="${largura}" cy="${altura - 3}" r="4" fill="var(--jade)"/>
+          <circle cx="${largura}" cy="${altura - 3}" r="4" fill="var(--positivo)"/>
         </svg>
         <div class="chart-eixo">
           <span>hoje · ${m(p.months[0]?.totalCents || 0, brlShort)}</span>
@@ -532,7 +581,7 @@ function balaoDoPlano(v) {
               <span style="font-size:11.5px;color:var(--muted)">${esc(b.name)}</span>
               <span class="num" style="font-size:12px">${m(b.cents)}</span>
             </div>`).join('')}
-          </div>` : '<div class="plano-detalhe"><span style="font-size:11.5px;color:var(--jade)">Nada mais devendo neste mês.</span></div>'}
+          </div>` : '<div class="plano-detalhe"><span style="font-size:11.5px;color:var(--positivo)">Nada mais devendo neste mês.</span></div>'}
         </details>`;
       }).join('')}
     </div>
@@ -594,8 +643,8 @@ function cartoes(app) {
   ${header(app)}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Saldo nas contas</span></div>
-    <div class="big ser">${m(v.saldoCents, brlShort)}</div>
+    <div class="top"><span class="lbl">Saldo nas contas</span>${avatar(app, "sm")}${botaoOlho("financas-saldo")}</div>
+    <div class="big ser">${olho(app, "financas-saldo", m(v.saldoCents, brlShort))}</div>
     <div class="foot">
       <span class="acc">${m(v.guardadoCents, brlShort)} guardado · ${m(v.comprometidoCents, brlShort)} já comprometido em parcelas</span>
     </div>
@@ -702,7 +751,7 @@ function valeLinha(x) {
 
 function faturaCartao(c, v) {
   const s = c.nextStatement;
-  const usoCor = c.usedRatio > 0.8 ? 'var(--red)' : c.usedRatio > 0.5 ? 'var(--amber)' : 'var(--jade)';
+  const usoCor = c.usedRatio > 0.8 ? 'var(--red)' : c.usedRatio > 0.5 ? 'var(--amber)' : 'var(--positivo)';
   return `<div class="debt">
     <div class="top">
       <div><div class="nm">${esc(c.name)}</div>
@@ -714,7 +763,7 @@ function faturaCartao(c, v) {
       <b class="num">${m(c.openCents)}</b>
     </div>
     ${s ? `<div class="ft" style="margin:0 0 10px">
-      <span class="s" style="font-size:11px;color:${c.nextStatementPaga ? 'var(--jade)' : 'var(--muted)'}">${c.nextStatementPaga ? `Paga · vencia ${formatShort(s.dueDate)}` : `A pagar · vence ${formatShort(s.dueDate)}`}</span>
+      <span class="s" style="font-size:11px;color:${c.nextStatementPaga ? 'var(--positivo)' : 'var(--muted)'}">${c.nextStatementPaga ? `Paga · vencia ${formatShort(s.dueDate)}` : `A pagar · vence ${formatShort(s.dueDate)}`}</span>
       <b class="num">${m(s.totalCents)}</b>
     </div>
     <div class="btns" style="margin:0 0 10px">
@@ -798,7 +847,7 @@ function barras(meses) {
   return `<div style="display:flex;align-items:flex-end;gap:5px;height:110px">
     ${meses.map((b) => `
       <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%">
-        <div style="width:100%;border-radius:5px 5px 2px 2px;background:${b.cents ? 'var(--jade)' : 'var(--line)'};
+        <div style="width:100%;border-radius:5px 5px 2px 2px;background:${b.cents ? 'var(--ouro)' : 'var(--line)'};
              height:${Math.max(3, (b.cents / maior) * 78)}%" title="${esc(brl(b.cents))}"></div>
         <span style="font-size:8.5px;color:var(--muted);letter-spacing:.03em">${monthAbbr(b.month).slice(0, 3)}</span>
       </div>`).join('')}
@@ -846,7 +895,7 @@ function fechamentoMes(v) {
   if (!f.entradasCents && !f.totalSaidasCents) return '';
 
   const pct = Math.min(100, Math.round(f.comprometidoRatio * 100));
-  const cor = f.comprometidoRatio > 1 ? 'var(--red)' : f.comprometidoRatio > 0.85 ? 'var(--amber)' : 'var(--jade)';
+  const cor = f.comprometidoRatio > 1 ? 'var(--red)' : f.comprometidoRatio > 0.85 ? 'var(--amber)' : 'var(--positivo)';
 
   return `
   <div class="sec" style="margin-top:0">
@@ -873,7 +922,7 @@ function fechamentoMes(v) {
       </div>
       <div class="ft" style="margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line-2)">
         <span style="font-size:11.5px">${f.fecha ? 'Livre para guardar' : 'Falta'}</span>
-        <span class="num" style="font-size:15px;color:${f.fecha ? 'var(--jade)' : 'var(--red)'}">${m(Math.abs(f.sobraCents))}</span>
+        <span class="num" style="font-size:15px;color:${f.fecha ? 'var(--positivo)' : 'var(--negativo)'}">${m(Math.abs(f.sobraCents))}</span>
       </div>
       <p style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:10px">
         O que vai para investimento ou cofrinho não entra como saída — guardar não é gastar.
@@ -937,7 +986,7 @@ function calendarioMes(v) {
     ${vazias}${celulas}
   </div>
   <div class="legend" style="margin-top:10px">
-    <span><i style="background:var(--jade)"></i>entrou mais</span>
+    <span><i style="background:var(--positivo)"></i>entrou mais</span>
     <span><i style="background:var(--red)"></i>saiu mais</span>
     ${v.cartoes.length ? '<span><i style="background:var(--blue)"></i>vencimento de cartão</span>' : ''}
   </div>`;
@@ -973,7 +1022,7 @@ function dividas(app) {
         fracao: v.progresso,
         centro: `${Math.round(v.progresso * 100)}%`,
         legenda: 'pago',
-        cor: 'var(--jade)',
+        cor: 'var(--positivo)',
         trilho: 'rgba(255,255,255,.12)',
         tamanho: 108, espessura: 11,
       })}
@@ -1012,7 +1061,7 @@ function dividas(app) {
       <div class="ft"><span style="font-size:11px;color:var(--muted)">Juros do mês</span>
         <span class="num" style="font-size:12px;color:var(--red)">${m(v.jurosMesCents)}</span></div>
       <div class="ft"><span style="font-size:11px;color:var(--muted)">Vai abater da dívida</span>
-        <span class="num" style="font-size:12px;color:var(--jade)">${m(Math.max(0, v.orcamentoDivida - v.jurosMesCents))}</span></div>
+        <span class="num" style="font-size:12px;color:var(--positivo)">${m(Math.max(0, v.orcamentoDivida - v.jurosMesCents))}</span></div>
       <p style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:12px;border-top:1px solid var(--line-2);padding-top:10px">
         Sai de ${m(v.rendaFixaCents, brlShort)} de entrada menos ${m(v.custoVida.cents, brlShort)} de custo de vida
         ${v.custoVida.source === 'histórico'
@@ -1123,9 +1172,9 @@ function dividaCard(d, i, plano, v) {
     <div class="ft"><span style="font-size:11px;color:var(--muted)">Custa parada</span>
       <span class="num" style="font-size:12px;color:var(--red)">${m(Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
     ${quitacao ? `<div class="ft"><span style="font-size:11px;color:var(--muted)">Quita em</span>
-      <span class="num" style="font-size:12px;color:var(--jade)">${formatMonthKey(quitacao)}</span></div>` : ''}
+      <span class="num" style="font-size:12px;color:var(--positivo)">${formatMonthKey(quitacao)}</span></div>` : ''}
     ${d.agreement || d.cardBlocked ? `<div class="legend" style="margin-top:8px">
-      ${d.agreement ? `<span><i style="background:var(--jade)"></i>acordo ${d.agreement.form === 'avista' ? 'à vista' : `em ${d.agreement.installments}x`}</span>` : ''}
+      ${d.agreement ? `<span><i style="background:var(--positivo)"></i>acordo ${d.agreement.form === 'avista' ? 'à vista' : `em ${d.agreement.installments}x`}</span>` : ''}
       ${d.cardBlocked ? `<span><i style="background:var(--red)"></i>cartão bloqueado</span>` : ''}
     </div>` : ''}
     ${implausivel ? `<button class="nudge crit" data-act="editar-divida" data-id="${esc(d.id)}" style="margin:10px 0 0;width:100%">
@@ -1150,7 +1199,7 @@ function curvaPlano(plano) {
   const d = pontos.map((p, i) => `${((i / Math.max(1, pontos.length - 1)) * w).toFixed(1)},${(h - (p / maior) * h).toFixed(1)}`);
   return `<div class="chart">
     <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:90px">
-      <polyline points="${d.join(' ')}" fill="none" stroke="var(--jade)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="${d.join(' ')}" fill="none" stroke="var(--ouro)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       <polyline points="0,${h} ${d.join(' ')} ${w},${h}" fill="var(--jade-soft)" stroke="none" opacity=".55"/>
     </svg>
   </div>
@@ -1260,7 +1309,7 @@ function analise(app) {
           total: s.emergency.targetMonths,
           centro: s.emergency.months >= 1 ? String(Math.floor(s.emergency.months)) : '0',
           legenda: s.emergency.months === 1 ? 'mês' : 'meses',
-          cor: s.emergency.months >= s.emergency.targetMonths ? 'var(--jade)'
+          cor: s.emergency.months >= s.emergency.targetMonths ? 'var(--positivo)'
             : s.emergency.months >= 1 ? 'var(--blue)' : 'var(--amber)',
         })}
         <div class="anel-texto">
@@ -1292,7 +1341,7 @@ function analise(app) {
         partes: [
           { nome: 'Essencial', cents: s.allocation.essentialCents, cor: 'var(--blue)' },
           { nome: 'Supérfluo', cents: s.allocation.discretionaryCents, cor: 'var(--amber)' },
-          { nome: 'Guardado', cents: s.allocation.investedCents, cor: 'var(--jade)' },
+          { nome: 'Guardado', cents: s.allocation.investedCents, cor: 'var(--positivo)' },
         ],
       })}
     </div>
@@ -1460,7 +1509,7 @@ function compromissos(v) {
       ${v.minimosCents > 0 ? faixa('Mínimos de dívida', v.minimosCents, 'var(--red)', true) : ''}
       <div class="ft" style="margin:4px 0 0;padding-top:14px;border-top:1px solid var(--line)">
         <span style="font-size:13px;font-weight:500;color:var(--ink)">Livre para guardar</span>
-        <b class="num" style="font-size:13.5px;color:var(--jade)">${m(livre)}</b>
+        <b class="num" style="font-size:13.5px;color:var(--positivo)">${m(livre)}</b>
       </div>
       <p style="font-size:11.5px;line-height:1.55;color:var(--muted);margin-top:10px">
         O que vai para investimento ou cofrinho não entra como saída — guardar não é gastar.
@@ -1480,7 +1529,7 @@ const indicador = (nome, valor, texto) => `<div class="gi">
 </div>`;
 
 function barraRitmo(p) {
-  const cor = p.exceeded ? 'var(--red)' : p.overPace ? 'var(--amber)' : 'var(--jade)';
+  const cor = p.exceeded ? 'var(--red)' : p.overPace ? 'var(--amber)' : 'var(--positivo)';
   return `<div class="bar">
     <i style="width:${Math.min(100, p.ratio * 100).toFixed(0)}%;background:${cor}"></i>
     <span class="pace" style="left:${Math.min(100, p.expectedRatio * 100).toFixed(0)}%"></span>
@@ -1681,19 +1730,19 @@ function cofrinho(g, app) {
   return `<div class="goal ${g.status === 'pausado' ? 'off' : ''}">
     <div class="tp">
       <div style="display:flex;gap:11px;align-items:center;min-width:0">
-        <div class="ic" style="background:var(--jade-soft);color:var(--jade)">${icon(g.kind === 'reserva' ? 'escudo' : 'cofre')}</div>
+        <div class="ic" style="background:var(--positivo-soft);color:var(--positivo)">${icon(g.kind === 'reserva' ? 'escudo' : 'cofre')}</div>
         <div style="min-width:0"><div class="nm">${esc(g.name)}</div>
           <div class="sb">${g.status === 'pausado' ? 'pausado' : meses !== null ? `${meses} ${meses === 1 ? 'mês' : 'meses'} no ritmo atual` : 'sem aporte definido'}${g.deadline ? ` · até ${formatShort(g.deadline)}` : ''}</div></div>
       </div>
       <button class="ib" data-act="editar-cofrinho" data-id="${esc(g.id)}" aria-label="Editar">${icon('engrenagem')}</button>
     </div>
-    <div class="bar"><i style="width:${(ratio * 100).toFixed(0)}%;background:var(--jade)"></i></div>
+    <div class="bar"><i style="width:${(ratio * 100).toFixed(0)}%;background:var(--ouro)"></i></div>
     <div class="ft">
       <span class="num" style="font-size:12px">${m(g.savedCents, brlShort)} de ${m(g.targetCents, brlShort)}</span>
       <span style="font-size:11px;color:var(--muted)">${g.monthlyCents ? `${m(g.monthlyCents, brlShort)}/mês` : 'parado'}</span>
     </div>
     ${rendeMes > 0 ? `<div class="ft"><span style="font-size:10.5px;color:var(--muted)">rende ${percent(g.monthlyRate, 2)} ao mês</span>
-      <span style="font-size:10.5px;color:var(--jade)">+${m(rendeMes, brlShort)}/mês</span></div>` : ''}
+      <span style="font-size:10.5px;color:var(--positivo)">+${m(rendeMes, brlShort)}/mês</span></div>` : ''}
     ${temCategoria ? `<div class="ft"><span style="font-size:10.5px;color:var(--muted)">gasto nas categorias ligadas</span>
       <span style="font-size:10.5px;color:var(--muted)">${m(custoCategoria, brlShort)}</span></div>` : ''}
     <button class="btn ghost" data-act="depositar-cofrinho" data-id="${esc(g.id)}" style="width:100%;margin-top:10px;padding:9px">${icon('mais')} Depositar</button>
@@ -1713,8 +1762,8 @@ function investimentos(app) {
   ${header(app)}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Patrimônio</span></div>
-    <div class="big ser">${m(s.netWorth.netCents, brlShort)}</div>
+    <div class="top"><span class="lbl">Patrimônio</span>${avatar(app, "sm")}${botaoOlho("patrimonio")}</div>
+    <div class="big ser">${olho(app, "patrimonio", m(s.netWorth.netCents, brlShort))}</div>
     <div class="foot"><span class="acc">${m(s.netWorth.contasCents, brlShort)} em contas · ${m(s.netWorth.bensCents, brlShort)} em bens · ${m(s.netWorth.liabilitiesCents, brlShort)} em dívidas</span></div>
   </div>
 
@@ -1726,7 +1775,7 @@ function investimentos(app) {
         <div class="bd"><div class="t">${esc(a.name)}</div>
           <div class="s">${a.monthlyRate ? `rende ${percent(a.monthlyRate, 2)} ao mês` : 'sem rendimento informado'}</div></div>
         <div class="rt"><div class="amt num">${m(a.balanceCents)}</div>
-          ${a.monthlyRate ? `<div class="dt" style="color:var(--jade)">+${m(monthlyYield(a.balanceCents, a.monthlyRate), brlShort)}/mês</div>` : ''}</div>
+          ${a.monthlyRate ? `<div class="dt" style="color:var(--positivo)">+${m(monthlyYield(a.balanceCents, a.monthlyRate), brlShort)}/mês</div>` : ''}</div>
       </button>`).join('')}</div>`
       : '<div class="empty">Nenhuma conta de investimento ainda.<br>Renda fixa, ações, cripto — o que você já tem investido.</div>'}
   </div>

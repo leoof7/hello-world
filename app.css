@@ -29,6 +29,10 @@
   --violet: #6b4e93; --blue: #7c8aa0; --steel: #9a9384; --graphite: #3a3628;
   /* Ouro é a cor de progresso: barra que enche, anel que fecha. */
   --ouro: #c4a46a;
+  /* Verde é dinheiro que entra e vermelho é dinheiro que sai. Ponto.
+     Estes DOIS não seguem a cor escolhida — ver o comentário em tema.js. */
+  --positivo: #2f6b4a; --negativo: #a63b32;
+  --positivo-soft: #e3efe7; --negativo-soft: #f5e4e1;
   /* O herói é chapado no redesign, não degradê. O gradiente continua sendo a
      forma do token para o aplicarCor() poder trocar por um puxado da cor. */
   --hero: linear-gradient(160deg, #161b2e 0%, #161b2e 55%, #1c2238 100%);
@@ -46,6 +50,8 @@
     --red: #e08278; --red-soft: #38201d;
     --violet: #a892d0; --blue: #9aa8bd; --steel: #8f887a; --graphite: #55503f;
   --ouro: #c4a46a;
+  --positivo: #7cb894; --negativo: #e08278;
+  --positivo-soft: #17281f; --negativo-soft: #38201d;
     --hero: linear-gradient(160deg, #161b2e 0%, #161b2e 55%, #1c2238 100%);
     --hero-glow: rgba(196,164,106,.18);
     --shadow-card: rgba(0,0,0,.5);
@@ -61,6 +67,8 @@
   --red: #e08278; --red-soft: #38201d;
   --violet: #a892d0; --blue: #9aa8bd; --steel: #8f887a; --graphite: #55503f;
   --ouro: #c4a46a;
+  --positivo: #7cb894; --negativo: #e08278;
+  --positivo-soft: #17281f; --negativo-soft: #38201d;
   --hero: linear-gradient(160deg, #161b2e 0%, #161b2e 55%, #1c2238 100%);
   --hero-glow: rgba(196,164,106,.18);
   --shadow-card: rgba(0,0,0,.5);
@@ -170,7 +178,7 @@ body {
 .pill svg { width: 10px; height: 10px; stroke: currentColor; stroke-width: 2.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 
 .prog { height: 8px; border-radius: 100px; background: rgba(255,255,255,.12); overflow: hidden; margin-top: 16px; }
-.prog i { display: block; height: 100%; border-radius: 100px; background: var(--jade); }
+.prog i { display: block; height: 100%; border-radius: 100px; background: var(--ouro); }
 
 /* ---------- avisos ---------- */
 .nudge {
@@ -266,7 +274,7 @@ body {
 
 .ze-resumo { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px; margin-bottom: 16px; }
 .ze-valor { font-size: 26px; font-weight: 600; letter-spacing: -.02em; color: var(--red); }
-.ze-valor.pos { color: var(--jade); }
+.ze-valor.pos { color: var(--positivo); }
 .ze-desc { font-size: 14px; color: var(--ink); margin-top: 6px; }
 .ze-meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
 
@@ -323,7 +331,7 @@ body {
 .row + .row { border-top: 1px solid var(--line-2); }
 .row .ic { width: 40px; height: 40px; border-radius: 12px; background: var(--chip); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .row .ic svg { width: 17px; height: 17px; stroke: var(--ink-2); stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.row .ic.j { background: var(--jade-soft); } .row .ic.j svg { stroke: var(--jade); }
+.row .ic.j { background: var(--positivo-soft); } .row .ic.j svg { stroke: var(--positivo); }
 .row .ic.r { background: var(--red-soft); } .row .ic.r svg { stroke: var(--red); }
 .row .ic.a { background: var(--amber-soft); } .row .ic.a svg { stroke: var(--amber); }
 .row .bd { flex: 1; min-width: 0; }
@@ -331,8 +339,8 @@ body {
 .row .s { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
 .row .rt { text-align: right; flex-shrink: 0; }
 .row .amt { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
-.row .amt.pos { color: var(--jade); }
-.row .amt.neg { color: var(--red); }
+.row .amt.pos { color: var(--positivo); }
+.row .amt.neg { color: var(--negativo); }
 .row .dt { font-size: 9.5px; color: var(--muted); margin-top: 2px; }
 .arr { color: var(--faint); flex-shrink: 0; display: flex; }
 .arr svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
@@ -475,9 +483,9 @@ body {
 .dobra > summary::after { content: "⌄"; color: var(--muted); font-size: 15px; }
 .dobra[open] > summary::after { content: "⌃"; }
 .dobra-nota { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: auto; margin-right: 6px; }
-.cal-dia.in-1 { background: var(--jade-soft); }
-.cal-dia.in-2 { background: var(--jade); color: var(--on-jade); opacity: .8; }
-.cal-dia.in-3 { background: var(--jade); color: var(--on-jade); }
+.cal-dia.in-1 { background: var(--positivo-soft); }
+.cal-dia.in-2 { background: var(--positivo); color: #fff; opacity: .8; }
+.cal-dia.in-3 { background: var(--positivo); color: #fff; }
 .cal-dia.out-1 { background: var(--red-soft); }
 .cal-dia.out-2 { background: var(--red); color: #fff; opacity: .8; }
 .cal-dia.out-3 { background: var(--red); color: #fff; }
@@ -810,3 +818,34 @@ body {
 .abas-geral [data-aba="geral"],
 .abas-dividas [data-aba="dividas"],
 .abas-tendencia [data-aba="tendencia"] { display: block; }
+
+/* ---------- privacidade por bloco ---------- */
+/* O olho geral esconde tudo ou nada. Mas o que se quer esconder num ônibus
+   quase nunca é tudo: é o saldo, ou é a lista. Esconder a tela inteira para
+   proteger um número faz a pessoa desligar a privacidade e nunca mais usar. */
+.olho {
+  width: 22px; height: 22px; border-radius: 7px; border: 0; cursor: pointer; padding: 0;
+  background: transparent; color: var(--faint); display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: color .16s ease, background .16s ease;
+}
+.olho:active { background: var(--chip); }
+.olho.off { color: var(--jade); background: var(--jade-soft); }
+.olho svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.hero .olho { color: rgba(255,255,255,.5); }
+.hero .olho.off { color: #fff; background: rgba(255,255,255,.14); }
+.valor-olho { letter-spacing: inherit; }
+
+/* ---------- avatar ---------- */
+.avatar.av-sm, .avatar.av-md {
+  border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; background: var(--chip); color: var(--muted); border: 0;
+}
+.avatar.av-sm { width: 26px; height: 26px; font-size: 11px; }
+.avatar.av-md { width: 44px; height: 44px; font-size: 16px; }
+.hero .avatar { background: rgba(255,255,255,.14); color: rgba(255,255,255,.85); margin-left: auto; }
+
+.saudacao { display: flex; align-items: center; gap: 14px; }
+.saudacao-txt { min-width: 0; flex: 1; }
+.wrow .t { display: flex; align-items: center; gap: 6px; }
+.wrow .t .l { flex: 1; min-width: 0; }

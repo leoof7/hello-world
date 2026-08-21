@@ -39,6 +39,8 @@ export function emptyDocument() {
       theme: 'auto',
       debtMethod: 'avalanche',
       backupEveryDays: 7,
+      // escopo -> escondido. Vazio significa 'segue o olho geral'.
+      privacidade: {},
     },
   };
 }

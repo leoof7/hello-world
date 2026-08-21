@@ -437,9 +437,33 @@ const ACOES = {
     toast(escolha === 'auto' ? 'Tema: segue o sistema' : escolha === 'dark' ? 'Tema escuro' : 'Tema claro');
   },
 
-  privacidade() {
+  /**
+   * O olho geral. Manda em tudo e apaga as escolhas por bloco.
+   *
+   * Apagar é o que faz "o último apertado manda" funcionar: sem isso, quem
+   * escondeu o saldo e depois tocou no geral para mostrar tudo continuaria
+   * com o saldo escondido, sem entender por quê.
+   */
+  async privacidade() {
     app.privacy = !app.privacy;
+    await commit((d) => { d.settings.privacidade = {}; }, { redraw: false });
     draw();
+  },
+
+  /**
+   * O olho de um bloco. Vale por cima do geral e fica salvo.
+   *
+   * O que se quer esconder num ônibus quase nunca é tudo: é o saldo, ou é a
+   * lista de lançamentos. Esconder a tela inteira para proteger um número faz
+   * a pessoa desligar a privacidade e nunca mais usar.
+   */
+  async 'privacidade-escopo'({ v }) {
+    if (!v) return;
+    const atual = app.doc.settings?.privacidade || {};
+    const estava = v in atual ? atual[v] : app.privacy;
+    await commit((d) => {
+      d.settings.privacidade = { ...(d.settings.privacidade || {}), [v]: !estava };
+    });
   },
 
   /**
