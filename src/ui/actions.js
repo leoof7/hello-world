@@ -13,6 +13,8 @@ import { learn } from '../core/categorize.js';
 import { KIND, validateDebt } from '../core/debts.js';
 import { podeComprar, custoDoHabito } from '../core/insights.js';
 import * as avisos from '../data/avisos.js';
+import { QUIZ } from '../core/perfil.js';
+import { CORES, aplicarCor } from './tema.js';
 import { MERCHANTS } from '../seed/categories.js';
 import * as db from '../data/db.js';
 import { buildBackup, readBackup, deliver, backupFilename, backupStatus, markDone, readFile } from '../data/backup.js';
@@ -112,9 +114,20 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
       return `<div class="field"><label>${esc(c.label)}</label>
         <div class="swatches" data-swatches="1">
           ${c.options.map((o) => `<button type="button" class="swatch ${String(o.value) === String(c.value) ? 'on' : ''}"
-            data-swatch-value="${esc(o.value)}" style="background:var(--${esc(o.value)})" aria-label="${esc(o.label)}" title="${esc(o.label)}">${icon('check')}</button>`).join('')}
+            data-swatch-value="${esc(o.value)}" style="background:${o.hex ? esc(o.hex) : `var(--${esc(o.value)})`}" aria-label="${esc(o.label)}" title="${esc(o.label)}">${icon('check')}</button>`).join('')}
         </div>
         <input type="hidden" name="${c.name}" value="${esc(c.value ?? '')}">
+      </div>`;
+    }
+    if (c.type === 'cor-livre') {
+      return `<div class="field"><label for="${id}">${esc(c.label)}</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input type="color" id="${id}" name="${c.name}" value="${esc(c.value || '#0a7b5a')}"
+            style="width:56px;height:44px;padding:2px;border-radius:12px;border:1px solid var(--line);background:var(--surface)">
+          <button type="button" class="btn ghost" data-limpar-cor="${c.name}" style="flex:1;padding:11px">Usar uma das prontas</button>
+        </div>
+        ${c.hint ? `<span style="font-size:11px;color:var(--muted)">${esc(c.hint)}</span>` : ''}
+        <input type="hidden" name="${c.name}__usar" value="${c.value ? '1' : ''}">
       </div>`;
     }
     if (c.type === 'checkbox') {
@@ -195,6 +208,24 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
           });
         }
 
+        // Escolher um preset desliga a cor livre, e mexer na cor livre desliga
+        // o preset — senão os dois ficam "ligados" e ninguém sabe qual vale.
+        for (const botao of card.querySelectorAll('[data-limpar-cor]')) {
+          botao.onclick = () => {
+            const usar = card.querySelector(`[name="${botao.dataset.limparCor}__usar"]`);
+            if (usar) usar.value = '';
+            botao.textContent = 'Usando uma das prontas';
+          };
+        }
+        for (const entrada of card.querySelectorAll('input[type="color"]')) {
+          entrada.addEventListener('input', () => {
+            const usar = card.querySelector(`[name="${entrada.name}__usar"]`);
+            if (usar) usar.value = '1';
+            const limpar = card.querySelector(`[data-limpar-cor="${entrada.name}"]`);
+            if (limpar) limpar.textContent = 'Usar uma das prontas';
+          });
+        }
+
         for (const grupo of card.querySelectorAll('.swatches')) {
           const escondido = grupo.parentElement.querySelector('input[type="hidden"]');
           grupo.addEventListener('click', (ev) => {
@@ -213,6 +244,11 @@ function form(titulo, sub, campos, { ok = 'Salvar', apagar = null, aoMontar = nu
           const out = {};
           for (const c of campos) {
             if (c.type === 'nota' || c.type === 'display') continue;
+            if (c.type === 'cor-livre') {
+              const usar = card.querySelector(`[name="${c.name}__usar"]`)?.value;
+              out[c.name] = usar ? card.querySelector(`[name="${c.name}"]`).value : '';
+              continue;
+            }
             const el = card.querySelector(`[name="${c.name}"]`);
             if (c.type === 'money') out[c.name] = toCents(el.value);
             else if (c.type === 'number') {
@@ -358,6 +394,9 @@ const ACOES = {
     const proximo = atual === 'auto' ? 'dark' : atual === 'dark' ? 'light' : 'auto';
     if (proximo === 'auto') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = proximo;
+    // A mesma cor precisa de tom diferente em fundo claro e escuro — sem isto,
+    // trocar o tema deixaria a cor escolhida sumindo ou berrando.
+    aplicarCor({ corId: app.doc.settings?.corId, corLivre: app.doc.settings?.corLivre });
     await commit((d) => { d.settings.theme = proximo; });
     toast(proximo === 'auto' ? 'Tema: segue o sistema' : proximo === 'dark' ? 'Tema escuro' : 'Tema claro');
   },
@@ -461,6 +500,95 @@ const ACOES = {
        <div class="btns"><button class="btn ${cabe ? 'primary' : 'ghost'}" data-x="1" style="width:100%">Entendi</button></div>`,
       { onMount: (card, fechar) => { card.querySelector('[data-x]').onclick = () => fechar(null); } }
     );
+  },
+
+  /** A cor do app. Cinco prontas mais a sua, com o texto por cima calculado. */
+  async cor() {
+    const atualId = app.doc.settings?.corId || 'jade';
+    const atualLivre = app.doc.settings?.corLivre || '';
+
+    const r = await form('Cor do app',
+      'A cor pinta botões, gráficos e destaques. A "sua cor" aceita qualquer tom — o app escolhe sozinho se o texto por cima fica claro ou escuro, para nada ficar ilegível.',
+      [
+        { name: 'corId', label: 'Cores prontas', type: 'cores', value: atualLivre ? '' : atualId,
+          options: CORES.map((c) => ({ value: c.id, label: c.nome, hex: c.base })) },
+        { name: 'corLivre', label: 'Ou a sua cor', type: 'cor-livre', value: atualLivre,
+          hint: 'deixe vazio para usar uma das prontas' },
+      ]);
+    if (!r) return;
+
+    await commit((d) => {
+      d.settings.corId = r.corId || 'jade';
+      d.settings.corLivre = r.corLivre || null;
+    }, { redraw: false });
+
+    aplicarCor({ corId: app.doc.settings.corId, corLivre: app.doc.settings.corLivre });
+    draw();
+    toast('Cor trocada.');
+  },
+
+  /**
+   * Foto de perfil. Vira data URI e entra no cofre cifrado como todo o resto —
+   * é reduzida antes porque uma foto de celular tem megabytes e o cofre inteiro
+   * é cifrado e decifrado a cada gravação.
+   */
+  async foto() {
+    if (app.doc.profile.foto) {
+      const trocar = await confirmar({
+        titulo: 'Trocar a foto?',
+        texto: 'Você já tem uma foto. Pode escolher outra ou remover a atual.',
+        ok: 'Escolher outra',
+      });
+      if (!trocar) {
+        await commit((d) => { delete d.profile.foto; });
+        toast('Foto removida.');
+        return;
+      }
+    }
+
+    const arquivo = await new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = () => resolve(input.files?.[0] || null);
+      input.click();
+    });
+    if (!arquivo) return;
+
+    try {
+      const dataUri = await reduzirImagem(arquivo, 256);
+      await commit((d) => { d.profile.foto = dataUri; });
+      toast('Foto salva — ela fica cifrada aqui dentro.');
+    } catch {
+      toast('Não consegui ler essa imagem.');
+    }
+  },
+
+  /** As três perguntas do começo. Só chute inicial — os números mandam depois. */
+  async quiz() {
+    const respostas = { ...(app.doc.profile.quiz || {}) };
+
+    for (const pergunta of QUIZ) {
+      const r = await form(pergunta.pergunta, null, [
+        { name: 'resposta', label: 'Escolha', type: 'pilulas', value: respostas[pergunta.id] || '',
+          options: pergunta.opcoes.map((o) => ({ value: o.valor, label: o.label, cor: 'chip' })) },
+      ], { ok: 'Próxima' });
+      if (!r) return;
+      respostas[pergunta.id] = r.resposta;
+    }
+
+    await commit((d) => { d.profile.quiz = respostas; });
+    const p = app.view.perfil;
+    if (p.fase) {
+      await sheet(
+        `<h4>${esc(p.fase.nome)}</h4>
+         <p class="sub">${esc(p.fase.texto)}</p>
+         <div class="ze-resumo"><div class="ze-desc">${esc(p.fase.foco)}</div>
+           <div class="ze-meta">${esc(p.origem === 'quiz' ? 'a partir do que você respondeu' : `a partir dos seus números · ${p.motivo}`)}</div></div>
+         <div class="btns"><button class="btn primary" data-x="1" style="width:100%">Entendi</button></div>`,
+        { onMount: (card, fechar) => { card.querySelector('[data-x]').onclick = () => fechar(null); } }
+      );
+    }
   },
 
   /** Liga ou desliga os avisos. A permissão só pode ser pedida a partir daqui. */
@@ -1344,6 +1472,38 @@ async function editarCartao(id) {
     d.cards = id ? d.cards.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.cards, registro];
   });
   toast('Salvo.');
+}
+
+/**
+ * Encolhe a imagem antes de guardar.
+ *
+ * Foto de celular tem vários megabytes, e o cofre inteiro é cifrado e
+ * decifrado a cada gravação — guardar o original faria toda edição de
+ * lançamento ficar lenta por causa de um retrato.
+ */
+function reduzirImagem(arquivo, lado = 256) {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onerror = () => reject(new Error('não consegui ler'));
+    leitor.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('não é imagem'));
+      img.onload = () => {
+        // recorte quadrado do centro: a foto vira um círculo na tela
+        const menor = Math.min(img.width, img.height);
+        const cx = (img.width - menor) / 2;
+        const cy = (img.height - menor) / 2;
+
+        const tela = document.createElement('canvas');
+        tela.width = lado;
+        tela.height = lado;
+        tela.getContext('2d').drawImage(img, cx, cy, menor, menor, 0, 0, lado, lado);
+        resolve(tela.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = leitor.result;
+    };
+    leitor.readAsDataURL(arquivo);
+  });
 }
 
 const pctParaFracao = (v) => {

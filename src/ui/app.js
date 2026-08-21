@@ -22,6 +22,7 @@ import { seedDocument } from '../seed/seed.js';
 import { CATEGORIES } from '../seed/categories.js';
 import { derive } from './state.js';
 import { render } from './screens.js';
+import { aplicarCor } from './tema.js';
 import { esc, icon, toast, sheet, $ } from './dom.js';
 
 // ---------------------------------------------------------------- estado vivo
@@ -499,6 +500,9 @@ async function main() {
   // tema salvo
   const tema = app.doc.settings?.theme || 'auto';
   if (tema !== 'auto') document.documentElement.dataset.theme = tema;
+  // A cor depende do tema já estar definido: o mesmo tom precisa de tratamento
+  // diferente em fundo claro e em fundo escuro.
+  aplicarCor({ corId: app.doc.settings?.corId, corLivre: app.doc.settings?.corLivre });
 
   app.backup = await backupStatus(app.todayISO);
 

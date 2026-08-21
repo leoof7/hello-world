@@ -15,6 +15,7 @@ import { scan } from '../core/leaks.js';
 import { diagnose } from '../core/health.js';
 import { monthlySpend, dailyNet, worstDay, NEUTRAS } from '../core/history.js';
 import { versusMedia, avisosDoDia, marcos } from '../core/insights.js';
+import { perfilAtual } from '../core/perfil.js';
 import { categorizeAll } from '../core/categorize.js';
 import { MERCHANTS } from '../seed/categories.js';
 import { PADROES } from '../config.js';
@@ -231,6 +232,19 @@ export function derive(doc, todayISO = today()) {
     lancamentos: [...doc.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 12),
     guia: guiaStatus(doc),
     comparativo,
+    // O perfil é a fase que a pessoa está vivendo, lida do comportamento.
+    // O quiz do começo só cobre o vazio, e perde a vez assim que há dado.
+    perfil: perfilAtual({
+      comportamento: {
+        dividaTotalCents,
+        jurosMesCents,
+        rendaMensalCents: rendaFixaCents,
+        reservaMeses: saude.emergency.months,
+        sobraCents,
+        mesesDeHistorico: custo.months || 0,
+      },
+      quizRespostas: doc.profile?.quiz || {},
+    }),
     // Os avisos precisam da projeção e das faturas já prontas, por isso saem
     // daqui de baixo e não lá de cima.
     avisos: avisosDoDia({

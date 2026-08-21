@@ -9,6 +9,11 @@ import { formatShort, formatLong, formatMonthKey, monthAbbr, addMonthKey, parts,
 import { KIND, horizon, comparePlans } from '../core/debts.js';
 import { monthsToGoal, monthlyYield } from '../core/goals.js';
 import { avisosLigados } from '../data/avisos.js';
+import { CORES } from './tema.js';
+
+const corAtualNome = (app) => (app.doc.settings?.corLivre
+  ? 'a sua cor'
+  : (CORES.find((c) => c.id === (app.doc.settings?.corId || 'jade'))?.nome || 'Verde').toLowerCase());
 import { backupMessage } from '../data/backup.js';
 import { esc, icon, sparkline } from './dom.js';
 import { wire } from './actions.js';
@@ -180,7 +185,9 @@ function tabbar(atual) {
 
 function header(app, { voltar } = {}) {
   const hoje = formatLong(app.todayISO);
+  const foto = app.doc?.profile?.foto;
   return `<div class="hd">
+    ${foto && !voltar ? `<button class="avatar" data-act="foto" aria-label="Trocar foto"><img src="${esc(foto)}" alt=""></button>` : ''}
     <div class="greet">
       ${voltar
         ? `<span class="s" data-go="${voltar}" style="cursor:pointer">‹ ${TITULOS[voltar]}</span>`
@@ -842,6 +849,22 @@ function analise(app) {
 
   <div class="bloco-titulo">Hoje</div>
 
+  ${v.perfil.fase ? `
+  <button class="fase c-${esc(v.perfil.fase.cor)}" data-act="quiz">
+    <div class="fase-topo">
+      <span class="fase-nome">${esc(v.perfil.fase.nome)}</span>
+      ${v.perfil.confianca < 0.6 ? '<span class="fase-tag">estimativa</span>' : ''}
+    </div>
+    <div class="fase-texto">${esc(v.perfil.fase.texto)}</div>
+    <div class="fase-foco">${esc(v.perfil.fase.foco)}</div>
+    <div class="fase-fonte">${esc(v.perfil.origem === 'quiz' ? 'pelo que você respondeu — vai mudar quando houver dado' : v.perfil.motivo)}</div>
+  </button>` : `
+  <button class="nudge" data-act="quiz" style="width:100%">
+    <span class="ic">${icon('ajuda')}</span>
+    <div><b>Ainda não te conheço</b><i>três perguntas rápidas e o app já começa a te orientar.</i></div>
+    <span class="arr">${icon('seta')}</span>
+  </button>`}
+
   <div class="wrow">
     ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), origemCusto)}
     ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, `alvo ${s.emergency.targetMonths} meses`)}
@@ -1106,6 +1129,10 @@ function tudo(app) {
     <div class="sh"><h3>Ajustes</h3></div>
     <div class="list">
       ${item('perfil', 'engrenagem', 'Seu nome e renda', esc(app.doc.profile.name || 'não preenchido'))}
+      ${item('foto', 'face', 'Foto de perfil', app.doc.profile.foto ? 'toque para trocar ou remover' : 'fica cifrada aqui dentro, como o resto')}
+      ${item('cor', 'grafico', 'Cor do app', corAtualNome(app))}
+      ${item('quiz', 'ajuda', 'Refazer as três perguntas', v.perfil.fase
+        ? `perfil: ${v.perfil.fase.nome}` : 'ajuda o app a te conhecer no começo')}
       ${item('tema', 'lua', 'Tema', app.doc.settings.theme === 'auto' ? 'segue o sistema' : app.doc.settings.theme === 'dark' ? 'escuro' : 'claro')}
       ${item('avisos', 'sino', 'Avisos', avisosLigados()
         ? 'ligados · o app te avisa ao abrir'
