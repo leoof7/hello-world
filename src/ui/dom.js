@@ -1,6 +1,8 @@
 // Helpers de renderização. Sem framework — o app é pequeno o bastante para
 // montar HTML com template string e trocar innerHTML de uma tela por vez.
 
+import { parts, monthAbbr } from '../core/dates.js';
+
 /** Escapa texto vindo de dados do usuário antes de entrar no HTML. */
 export function esc(value) {
   return String(value ?? '')
@@ -102,6 +104,33 @@ export function toast(message, ms = 2600) {
   el.textContent = message;
   document.body.appendChild(el);
   toastTimer = setTimeout(() => el.remove(), ms);
+}
+
+/**
+ * A data como coluna, não como texto no fim de uma frase.
+ *
+ * Numa lista, a data é o que o olho usa para se localizar. Enterrada em
+ * "sugestão: mercado · fonte · 14/08" ela deixa de ser lida. Aqui vira dia
+ * grande, mês pequeno, e hoje sai colorido — a linha inteira ganha ritmo
+ * vertical e dá para achar um lançamento sem ler nada.
+ */
+export function colunaDia(dateISO, todayISO) {
+  const { d } = parts(dateISO);
+  const mes = monthAbbr(String(dateISO).slice(0, 7)).toLowerCase();
+  return `<div class="dia ${dateISO === todayISO ? 'hoje' : ''}">
+    <span class="dia-n">${d}</span><span class="dia-m">${esc(mes)}</span>
+  </div>`;
+}
+
+/**
+ * As pílulas do subtítulo de uma linha.
+ *
+ * Substituem o "a · b · c" separado por ponto, que numa tela de 390px vira uma
+ * linha só de texto cinza que ninguém distingue. Cada pedaço com sua borda é
+ * lido como um pedaço.
+ */
+export function pilulasDaLinha(etiquetas) {
+  return etiquetas.filter(Boolean).map((e) => `<span class="tagzinha">${esc(e)}</span>`).join('');
 }
 
 /**

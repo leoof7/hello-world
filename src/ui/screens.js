@@ -15,7 +15,7 @@ const corAtualNome = (app) => (app.doc.settings?.corLivre
   ? 'a sua cor'
   : (CORES.find((c) => c.id === (app.doc.settings?.corId || 'jade'))?.nome || 'Verde').toLowerCase());
 import { backupMessage } from '../data/backup.js';
-import { esc, icon, sparkline } from './dom.js';
+import { esc, icon, sparkline, colunaDia, pilulasDaLinha } from './dom.js';
 import { wire } from './actions.js';
 
 const TABS = [
@@ -454,27 +454,16 @@ function linha(t, v, { acao = 'editar' } = {}) {
   const classe = positivo ? 'j' : t.installment ? 'a' : '';
   const ic = positivo ? 'dinheiro' : t.installment ? 'lista' : t.method === 'pix' ? 'pix' : t.cardId ? 'cartao' : 'banco';
 
-  // A data sai da linha de texto e vira coluna própria: dia grande, mês
-  // pequeno. Numa lista, a data é a coisa que o olho usa para se localizar —
-  // enterrada no meio de "categoria · data" ela some.
-  const { d, m: mes } = parts(t.date);
-  const hoje = t.date === v.todayISO;
-
-  const etiquetas = [
-    t.installment ? `Parcela ${t.installment.n}/${t.installment.of}` : null,
-    cat?.name || 'sem categoria',
-    t.categoriaAnterior ? `era ${t.categoriaAnterior}` : null,
-  ].filter(Boolean);
-
   return `<button class="row" data-act="${acao}" data-id="${esc(t.id)}">
-    <div class="dia ${hoje ? 'hoje' : ''}">
-      <span class="dia-n">${d}</span>
-      <span class="dia-m">${esc(monthAbbr(t.date.slice(0, 7)).toLowerCase())}</span>
-    </div>
+    ${colunaDia(t.date, v.todayISO)}
     <div class="ic ${classe}">${icon(ic)}</div>
     <div class="bd">
       <div class="t">${esc(t.description || 'Lançamento')}</div>
-      <div class="s">${etiquetas.map((e) => `<span class="tagzinha">${esc(e)}</span>`).join('')}</div>
+      <div class="s">${pilulasDaLinha([
+        t.installment ? `Parcela ${t.installment.n}/${t.installment.of}` : null,
+        cat?.name || 'sem categoria',
+        t.categoriaAnterior ? `era ${t.categoriaAnterior}` : null,
+      ])}</div>
     </div>
     <div class="rt">
       <div class="amt num ${positivo ? 'pos' : ''}">${m(t.amountCents, (c) => formatCents(c, { sign: true }))}</div>
@@ -1071,9 +1060,10 @@ function analise(app) {
     <div class="sh"><h3>Assinaturas encontradas</h3><a>${m(v.vazamentos.monthlySubscriptionsCents, brlShort)}/mês</a></div>
     <div class="list">${v.vazamentos.recurring.slice(0, 8).map((r) => `
       <div class="row">
+        ${colunaDia(r.lastDate, v.todayISO)}
         <div class="ic">${icon('relogio')}</div>
         <div class="bd"><div class="t">${esc(r.name)}</div>
-          <div class="s">${r.period} · ${r.occurrences} cobranças · última ${formatShort(r.lastDate)}</div></div>
+          <div class="s">${pilulasDaLinha([r.period, `${r.occurrences} cobranças`])}</div></div>
         <div class="rt"><div class="amt num">${m(r.lastAmountCents)}</div><div class="dt">${m(r.yearlyCents, brlShort)}/ano</div></div>
       </div>`).join('')}</div>
   </div>` : ''}
@@ -1442,8 +1432,15 @@ function recebimentos(app) {
       fechado — assim ela não é puxada por um mês pela metade.</p>` : ''}
     ${avulsos.length ? `<div class="list">${avulsos.map((t) => `
       <button class="row" data-act="editar" data-id="${esc(t.id)}">
+        ${colunaDia(t.date, v.todayISO)}
         <div class="ic j">${icon(t.method === 'pix' ? 'pix' : 'dinheiro')}</div>
-        <div class="bd"><div class="t">${esc(t.description)}</div><div class="s">${formatShort(t.date)}</div></div>
+        <div class="bd"><div class="t">${esc(t.description)}</div>
+          <div class="s">${pilulasDaLinha([
+            // "entrada" em toda linha de uma seção de recebimentos não informa
+            // nada. A origem, sim: é o que difere uma linha da outra.
+            t.method === 'pix' ? 'Pix' : t.accountId ? v.contaNome?.[t.accountId] || 'conta' : 'dinheiro',
+            v.catById[t.categoryId]?.name || null,
+          ])}</div></div>
         <div class="rt"><div class="amt num pos">${m(t.amountCents, (c) => formatCents(c, { sign: true }))}</div></div>
       </button>`).join('')}</div>` : '<div class="empty">Nenhum recebimento avulso lançado.</div>'}
   </div>
@@ -1472,11 +1469,12 @@ function revisao(app) {
     <div class="sh"><h3>Sem categoria</h3><a>${v.revisao.length}</a></div>
     ${v.revisao.length ? `<div class="list">${v.revisao.map((t) => `
       <button class="row" data-act="categorizar" data-id="${esc(t.id)}">
+        ${colunaDia(t.date, v.todayISO)}
         <div class="ic ${t.categoryId ? 'a' : ''}">${icon(t.method === 'pix' ? 'pix' : t.cardId ? 'cartao' : 'banco')}</div>
         <div class="bd"><div class="t">${esc(t.description)}</div>
           <div class="s">${t.categoryId
-            ? `sugestão: ${esc(v.catById[t.categoryId]?.name || t.categoryId)} · ${esc(t.categorySource || '')}`
-            : 'o app não soube — me diga uma vez e ele guarda'} · ${formatShort(t.date)}</div></div>
+            ? pilulasDaLinha([`sugestão: ${v.catById[t.categoryId]?.name || t.categoryId}`, t.categorySource || null])
+            : '<span class="tagzinha">o app não soube — me diga uma vez</span>'}</div></div>
         <div class="rt"><div class="amt num">${m(t.amountCents, (c) => formatCents(c, { sign: true }))}</div></div>
       </button>`).join('')}</div>`
       : '<div class="empty">Nada para revisar. Tudo categorizado.</div>'}

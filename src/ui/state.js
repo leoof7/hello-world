@@ -25,6 +25,7 @@ export function derive(doc, todayISO = today()) {
   const mes = monthKey(todayISO);
   const categorias = doc.categories?.length ? doc.categories : [];
   const catById = Object.fromEntries(categorias.map((c) => [c.id, c]));
+  const contaNome = Object.fromEntries(doc.accounts.map((a) => [a.id, a.name]));
 
   // ---- faturas ----
   const faturas = statementsOf(doc, todayISO);
@@ -183,6 +184,7 @@ export function derive(doc, todayISO = today()) {
     vazio,
     doc,
     catById,
+    contaNome,
     categorias,
     cartoes,
     faturas,

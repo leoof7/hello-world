@@ -23,7 +23,7 @@ import * as csv from '../io/csv.js';
 import * as ofx from '../io/ofx.js';
 import { buildCalendar } from '../io/ics.js';
 import { statementsOf } from './state.js';
-import { esc, icon, toast, sheet, confirmar, entregar } from './dom.js';
+import { esc, icon, toast, sheet, confirmar, entregar, colunaDia, pilulasDaLinha } from './dom.js';
 import { botaoColar, colarNoCampo } from './frase.js';
 
 export function wire() {
@@ -784,7 +784,8 @@ const ACOES = {
            .sort((a, b) => (a.date < b.date ? 1 : -1))
            .map((t) => `
              <div class="row">
-               <div class="bd"><div class="t">${esc(t.description)}</div><div class="s">${formatShort(t.date)}</div></div>
+               ${colunaDia(t.date, app.todayISO)}
+               <div class="bd"><div class="t">${esc(t.description)}</div></div>
                <div class="rt"><div class="amt num">${esc(brl(Math.abs(t.amountCents)))}</div></div>
              </div>`).join('')}
          </div>`).join('')}</div>` : '<div class="empty">Nenhum gasto categorizado nesse mês.</div>'}
@@ -1926,8 +1927,9 @@ async function confirmarVarias(partes) {
      <p class="sub">Confira antes de lançar — ${esc(brl(total))} no total.</p>
      <div class="list">${lidos.map((l) => `
        <div class="row">
+         ${colunaDia(l.date, app.todayISO)}
          <div class="bd"><div class="t">${esc(l.description || l.raw)}</div>
-           <div class="s">${esc(nomeDaOrigem(l))} · ${esc(formatShort(l.date))}</div></div>
+           <div class="s">${pilulasDaLinha([nomeDaOrigem(l)])}</div></div>
          <div class="rt"><div class="amt num">${esc(brl(l.amountCents || 0))}</div></div>
        </div>`).join('')}</div>
      <div class="btns"><button class="btn primary" data-ok="1">Lançar os ${lidos.length}</button>
