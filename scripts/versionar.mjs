@@ -14,8 +14,8 @@
 //   node scripts/versionar.mjs --conferir só confere e sai com erro se mudou
 
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const RAIZ = fileURLToPath(new URL('..', import.meta.url));
 const SW = `${RAIZ}sw.js`;
@@ -27,6 +27,30 @@ export function arquivosDoApp(textoDoSW = readFileSync(SW, 'utf8')) {
   return [...lista[1].matchAll(/'\.\/([^']*)'/g)]
     .map((m) => m[1])
     .filter(Boolean);
+}
+
+/** Todo .js dentro de src/, com barra normal, relativo à raiz. */
+function modulosNoDisco(raiz = RAIZ, pasta = 'src') {
+  const achados = [];
+  for (const item of readdirSync(`${raiz}${pasta}`, { withFileTypes: true })) {
+    const caminho = `${pasta}/${item.name}`;
+    if (item.isDirectory()) achados.push(...modulosNoDisco(raiz, caminho));
+    else if (item.name.endsWith('.js')) achados.push(caminho);
+  }
+  return achados;
+}
+
+/**
+ * Módulos que existem em src/ e não estão na lista do service worker.
+ *
+ * Este é o erro que mais voltou neste projeto: criar um módulo novo, importar
+ * em outro, tudo funcionar no navegador com rede — e o app instalado quebrar
+ * porque o arquivo nunca entrou no cache. O navegador não avisa; a tela só
+ * fica branca. Conferir aqui é a única forma de isso não depender de memória.
+ */
+export function modulosForaDoCache(raiz = RAIZ) {
+  const listados = new Set(arquivosDoApp(readFileSync(`${raiz}sw.js`, 'utf8')));
+  return modulosNoDisco(raiz).filter((m) => !listados.has(m));
 }
 
 /**
@@ -70,9 +94,24 @@ export function gravar(raiz = RAIZ) {
   return nova;
 }
 
-// Rodando direto pela linha de comando
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
+// Rodando direto pela linha de comando.
+//
+// Comparar o fim do caminho parece bastar e não basta: no Windows o argv[1]
+// vem com barra invertida, `split('/')` não separa nada, e o teste dava falso
+// sempre. Resultado: `npm test` rodava este arquivo, ele saía 0 sem conferir
+// coisa nenhuma, e a conferência de versão existia só no papel. Converter os
+// dois lados para URL de arquivo é o jeito que não depende do separador.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const conferir = process.argv.includes('--conferir');
+
+  const faltando = modulosForaDoCache();
+  if (faltando.length) {
+    console.error('estes módulos não estão na lista ARQUIVOS do sw.js:');
+    for (const m of faltando) console.error(`  ./${m}`);
+    console.error('o app instalado quebraria com a tela branca. adicione e rode de novo.');
+    process.exit(1);
+  }
+
   const esperada = calcularVersao();
   const atual = versaoGravada();
 

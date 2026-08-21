@@ -104,6 +104,7 @@ for (const tema of ['dark', 'light']) {
     isMobile: true,
     hasTouch: true,
     colorScheme: tema,
+    permissions: ['clipboard-read', 'clipboard-write'],
   });
   const page = await ctx.newPage();
   const erros = [];
@@ -123,6 +124,26 @@ for (const tema of ['dark', 'light']) {
   await page.waitForSelector('#anotei', { timeout: 20000 });
   const palavras = await page.$$eval('.word .w', (els) => els.map((e) => e.textContent.trim()));
   ok('a frase de recuperação tem 12 palavras', palavras.length === 12);
+
+  // copiar é o que salva quem não vai escrever doze palavras no papel
+  await page.click('[data-frase="copiar"]');
+  const copiado = await page.evaluate(() => navigator.clipboard.readText());
+  ok('o botão copia as doze palavras na ordem', copiado === palavras.join(' '), copiado);
+
+  // e o que foi copiado volta inteiro na restauração, mesmo saindo bagunçado
+  // de um bloco de notas — numeração, caixa alta e vírgula não são palavras
+  const voltou = await page.evaluate(async (frase) => {
+    const { colarNoCampo } = await import('./src/ui/frase.js');
+    await navigator.clipboard.writeText(frase.map((w, i) => `${i + 1}. ${w.toUpperCase()},`).join('\n'));
+    const campo = document.createElement('textarea');
+    document.body.appendChild(campo);
+    await colarNoCampo(campo);
+    const v = campo.value;
+    campo.remove();
+    return v;
+  }, palavras);
+  ok('colar aceita numeração e caixa alta', voltou === palavras.join(' '), voltou);
+
   await page.click('#anotei');
 
   await page.waitForSelector('#conf');

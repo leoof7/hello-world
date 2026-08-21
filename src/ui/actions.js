@@ -18,12 +18,13 @@ import { CORES, aplicarCor } from './tema.js';
 import { MERCHANTS } from '../seed/categories.js';
 import * as db from '../data/db.js';
 import { buildBackup, readBackup, deliver, backupFilename, backupStatus, markDone, readFile } from '../data/backup.js';
-import { phraseToBytes } from '../data/recovery.js';
+import { phraseToBytes, limparFrase } from '../data/recovery.js';
 import * as csv from '../io/csv.js';
 import * as ofx from '../io/ofx.js';
 import { buildCalendar } from '../io/ics.js';
 import { statementsOf } from './state.js';
-import { esc, icon, toast, sheet, confirmar } from './dom.js';
+import { esc, icon, toast, sheet, confirmar, entregar } from './dom.js';
+import { botaoColar, colarNoCampo } from './frase.js';
 
 export function wire() {
   const raiz = document.getElementById('app');
@@ -355,20 +356,6 @@ const novoId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(3
 const igual = (a, b) =>
   String(a ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   === String(b ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-/** Entrega um arquivo pelo melhor caminho do aparelho. */
-async function entregar(conteudo, nome, tipo = 'text/plain') {
-  const arquivo = new File([conteudo], nome, { type: tipo });
-  if (navigator.canShare?.({ files: [arquivo] })) {
-    try { await navigator.share({ files: [arquivo], title: nome }); return 'compartilhado'; }
-    catch (e) { if (e?.name === 'AbortError') return 'cancelado'; }
-  }
-  const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }));
-  const a = document.createElement('a');
-  a.href = url; a.download = nome; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return 'baixado';
-}
 
 /** Abre o seletor de arquivos e devolve o conteúdo em texto. */
 function escolherArquivo(accept) {
@@ -2138,13 +2125,16 @@ function pedirFraseCurta(titulo, sub) {
     `<h4>${esc(titulo)}</h4><p class="sub">${esc(sub)}</p>
      <div class="field"><label for="fr12">Suas doze palavras</label>
        <textarea id="fr12" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea></div>
+     <div class="btns" style="margin-top:8px">${botaoColar()}</div>
      <div class="btns"><button class="btn primary" data-ok="1">Continuar</button>
        <button class="btn ghost" data-x="1">Cancelar</button></div>`,
     {
       onMount: (card, fechar) => {
+        const campo = card.querySelector('#fr12');
         card.querySelector('[data-x]').onclick = () => fechar(null);
+        card.querySelector('[data-frase="colar"]').onclick = () => colarNoCampo(campo);
         card.querySelector('[data-ok]').onclick = () => {
-          const palavras = card.querySelector('#fr12').value.trim().split(/\s+/);
+          const palavras = limparFrase(campo.value);
           try { phraseToBytes(palavras); } catch (e) { toast(e.message); return; }
           fechar(palavras);
         };

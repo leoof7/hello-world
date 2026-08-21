@@ -56,6 +56,8 @@ const ICONS = {
   cofre: '<path d="M4 10.5a6 6 0 0 1 6-6h3a6 6 0 0 1 6 6v3a6 6 0 0 1-6 6h-3a6 6 0 0 1-6-6z"/><path d="M8.5 10.5h.01M4 12H2.5"/>',
   cadeado: '<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M7.5 10V7a4.5 4.5 0 0 1 9 0v3"/>',
   download: '<path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 20h16"/>',
+  copiar: '<rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15h-.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"/>',
+  colar: '<path d="M8 4H6.5A1.5 1.5 0 0 0 5 5.5v14A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-14A1.5 1.5 0 0 0 17.5 4H16"/><rect x="8" y="2.5" width="8" height="4" rx="1.3"/>',
   upload: '<path d="M12 21V9M7.5 13.5 12 9l4.5 4.5M4 4h16"/>',
   lista: '<path d="M4 6h16M4 12h16M4 18h10"/>',
   carro: '<path d="M3 12.5h18v4H3zM4.5 12.5 6 7h12l1.5 5.5"/><circle cx="7" cy="16.5" r="1.4"/><circle cx="17" cy="16.5" r="1.4"/>',
@@ -100,6 +102,70 @@ export function toast(message, ms = 2600) {
   el.textContent = message;
   document.body.appendChild(el);
   toastTimer = setTimeout(() => el.remove(), ms);
+}
+
+/**
+ * Copia para a área de transferência. Devolve se deu certo.
+ *
+ * `navigator.clipboard` só existe em contexto seguro, e o app roda em http://
+ * na rede local enquanto não tem HTTPS — justamente onde a pessoa mais precisa
+ * do botão. Por isso o plano B com textarea e execCommand continua aqui.
+ */
+export async function copiar(texto) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    }
+  } catch { /* sem permissão ou sem contexto seguro: tenta o plano B */ }
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, texto.length); // o iOS ignora select() sozinho
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lê a área de transferência. Devolve '' quando o aparelho não deixa.
+ *
+ * Vazio aqui não é erro: no iPhone o Safari pode pedir permissão e a pessoa
+ * pode negar. Quem chama trata isso pedindo o colar manual, sem alarde.
+ */
+export async function colar() {
+  try {
+    return (await navigator.clipboard?.readText?.()) || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Entrega um arquivo pelo melhor caminho do aparelho.
+ *
+ * No iPhone o share sheet é o que leva para o app Arquivos ou para o iCloud;
+ * o download com <a> é o caminho do desktop e do Android.
+ */
+export async function entregar(conteudo, nome, tipo = 'text/plain') {
+  const arquivo = new File([conteudo], nome, { type: tipo });
+  if (navigator.canShare?.({ files: [arquivo] })) {
+    try { await navigator.share({ files: [arquivo], title: nome }); return 'compartilhado'; }
+    catch (e) { if (e?.name === 'AbortError') return 'cancelado'; }
+  }
+  const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nome; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return 'baixado';
 }
 
 /** Folha inferior. Devolve uma promessa que resolve com o que o conteúdo enviar. */

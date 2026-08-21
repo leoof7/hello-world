@@ -7,6 +7,7 @@ import {
 } from '../src/data/crypto.js';
 import {
   WORDS, generatePhrase, phraseToBytes, phraseMatches, challengePositions, suggest,
+  limparFrase, fraseParaTexto,
 } from '../src/data/recovery.js';
 
 // btoa/atob existem no Node 22, mas garantimos o ambiente do teste.
@@ -167,4 +168,32 @@ test('autocompletar ajuda a digitar sem errar', () => {
   const s = suggest('ca');
   assert.ok(s.length > 0);
   assert.ok(s.every((w) => w.startsWith('ca')));
+});
+
+// ------------------------------------------------- copiar e colar as doze
+
+test('o que a pessoa copia volta inteiro quando ela cola', () => {
+  const frase = generatePhrase();
+  assert.deepEqual(limparFrase(fraseParaTexto(frase)), frase);
+});
+
+test('numeração colada de um bloco de notas não vira palavra desconhecida', () => {
+  const colado = '1. abelha\n2. agua\n3. anel\n4. anjo\n5. arroz\n6. azul\n'
+    + '7. balde\n8. banco\n9. barco\n10. batata\n11. bicho\n12. bolso';
+  const palavras = limparFrase(colado);
+  assert.equal(palavras.length, 12);
+  assert.doesNotThrow(() => phraseToBytes(palavras));
+  assert.equal(palavras[9], 'batata', 'o "10." sumiu junto com o "1."');
+});
+
+test('vírgula, acento e caixa alta colados não quebram a frase', () => {
+  const frase = generatePhrase();
+  const bagunca = frase.join(', ').toUpperCase().replace(/A/g, 'Á');
+  assert.deepEqual(limparFrase(bagunca), frase);
+});
+
+test('colar qualquer coisa não inventa palavra', () => {
+  assert.deepEqual(limparFrase('   \n  '), []);
+  assert.deepEqual(limparFrase('123 456'), []);
+  assert.deepEqual(limparFrase(null), []);
 });

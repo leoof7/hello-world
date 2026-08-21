@@ -78,6 +78,28 @@ export function phraseToBytes(words) {
   return bytes;
 }
 
+/**
+ * Aceita a frase vinda de qualquer lugar e devolve as palavras limpas.
+ *
+ * O gerenciador de senhas devolve uma linha só; um bloco de notas devolve
+ * "1. abelha" por linha; alguém separa por vírgula. Nenhuma palavra da lista
+ * tem dígito ou pontuação, então tudo que não é letra é separador — e o número
+ * da posição some junto, em vez de virar "palavra desconhecida: 1".
+ */
+export function limparFrase(texto) {
+  if (Array.isArray(texto)) texto = texto.join(' ');
+  return String(texto ?? '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+}
+
+/** O texto que a pessoa copia — uma linha, do jeito que o cofre de senhas espera. */
+export function fraseParaTexto(palavras) {
+  return palavras.join(' ');
+}
+
 /** Confere se o que o usuário digitou bate com a frase gerada. */
 export function phraseMatches(original, typed) {
   try {

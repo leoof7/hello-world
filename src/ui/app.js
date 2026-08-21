@@ -15,7 +15,7 @@ import {
   biometricsAvailable, createPasskey, prfSecret,
   deriveKeyFromSecret, deriveKeyFromPassword, b64ToBytes,
 } from '../data/crypto.js';
-import { generatePhrase, phraseToBytes, challengePositions, normalize } from '../data/recovery.js';
+import { generatePhrase, phraseToBytes, challengePositions, normalize, limparFrase } from '../data/recovery.js';
 import { backupStatus } from '../data/backup.js';
 import { emptyDocument } from '../data/migrations.js';
 import { seedDocument } from '../seed/seed.js';
@@ -24,6 +24,7 @@ import { derive } from './state.js';
 import { render } from './screens.js';
 import { aplicarCor } from './tema.js';
 import { esc, icon, toast, sheet, $ } from './dom.js';
+import { botoesDaFrase, ligarBotoesDaFrase, botaoColar, colarNoCampo } from './frase.js';
 
 // ---------------------------------------------------------------- estado vivo
 
@@ -85,16 +86,18 @@ async function primeiraVez() {
     <div class="boot-mark">Zero<i></i></div>
     <p class="ser">Antes de tudo, guarde estas doze palavras.</p>
     <p class="why">Não existe servidor e não existe "esqueci a senha". Estas palavras
-       são a única forma de abrir o seu backup em outro aparelho. Escreva no papel.
-       Foto na galeria não conta como lugar seguro.</p>
+       são a única forma de abrir o seu backup em outro aparelho. Escreva no papel,
+       ou cole no seu gerenciador de senhas. Foto na galeria não conta como lugar seguro.</p>
     <div class="words" id="words">
       ${phrase.map((w, i) => `<div class="word"><div class="i">${i + 1}</div><div class="w">${esc(w)}</div></div>`).join('')}
     </div>
-    <div class="btns" style="width:100%;max-width:340px">
+    <div class="btns" style="width:100%;max-width:340px;flex-direction:column">
       <button class="btn primary" id="anotei">Anotei, continuar</button>
+      ${botoesDaFrase()}
     </div>
   `);
 
+  ligarBotoesDaFrase(document.getElementById('app'), phrase);
   await new Promise((r) => { $('#anotei').onclick = r; });
   await confirmarPalavras(phrase);
 
@@ -160,8 +163,12 @@ async function confirmarPalavras(phrase) {
         <div class="words">
           ${phrase.map((w, i) => `<div class="word"><div class="i">${i + 1}</div><div class="w">${esc(w)}</div></div>`).join('')}
         </div>
-        <div class="btns" style="width:100%;max-width:340px"><button class="btn primary" id="ok">Agora sim</button></div>
+        <div class="btns" style="width:100%;max-width:340px;flex-direction:column">
+          <button class="btn primary" id="ok">Agora sim</button>
+          ${botoesDaFrase()}
+        </div>
       `);
+      ligarBotoesDaFrase(document.getElementById('app'), phrase);
       await new Promise((r) => { $('#ok').onclick = r; });
       continue;
     }
@@ -354,17 +361,20 @@ function pedirFrase() {
     lockScreen(`
       <div class="boot-mark">Zero<i></i></div>
       <p class="ser">Digite as doze palavras.</p>
-      <p class="why">Na ordem, separadas por espaço.</p>
+      <p class="why">Na ordem. Pode colar do seu gerenciador de senhas — numeração
+         e vírgula não atrapalham.</p>
       <div style="width:100%;max-width:340px;margin-top:20px">
         <div class="field">
           <label>Frase de recuperação</label>
           <textarea id="fr" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
         </div>
+        <div class="btns" style="margin-top:8px">${botaoColar()}</div>
         <div class="btns"><button class="btn primary" id="ok">Abrir</button></div>
       </div>
     `);
+    $('[data-frase="colar"]').onclick = () => colarNoCampo($('#fr'));
     $('#ok').onclick = () => {
-      const palavras = $('#fr').value.trim().split(/\s+/);
+      const palavras = limparFrase($('#fr').value);
       try { phraseToBytes(palavras); } catch (e) { toast(e.message); return; }
       resolve(palavras);
     };
