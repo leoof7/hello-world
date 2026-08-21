@@ -360,6 +360,25 @@ const opcoesOrigem = () => [
 
 const novoId = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
+/**
+ * Liga ou desliga um escopo de privacidade.
+ *
+ * O estado anterior é lido pela mesma cadeia que a tela usa para decidir —
+ * bloco, depois tela, depois geral. Sem isso, o primeiro toque num bloco que
+ * já estava escondido pela tela não faria nada visível: gravaria `true` em
+ * cima de algo que já mostrava escondido.
+ */
+async function alternarEscopo(chave) {
+  const atual = app.doc.settings?.privacidade || {};
+  const daTela = `tela:${app.screen || 'painel'}`;
+  const estava = chave in atual ? atual[chave]
+    : daTela in atual ? atual[daTela]
+    : app.privacy;
+  await commit((d) => {
+    d.settings.privacidade = { ...(d.settings.privacidade || {}), [chave]: !estava };
+  });
+}
+
 /** "todo dia 5" ou "dias 5 e 20 · 2x no mês" — o que a pessoa precisa conferir. */
 function quandoRepete(r) {
   const dias = diasDoRecorrente(r);
@@ -459,10 +478,22 @@ const ACOES = {
    */
   async 'privacidade-escopo'({ v }) {
     if (!v) return;
+    await alternarEscopo(v);
+  },
+
+  /** O olho desta tela. Vale para todo dinheiro dela, e apaga os dos blocos. */
+  async 'privacidade-tela'() {
+    const chave = `tela:${app.screen || 'painel'}`;
     const atual = app.doc.settings?.privacidade || {};
-    const estava = v in atual ? atual[v] : app.privacy;
+    const estava = chave in atual ? atual[chave] : app.privacy;
     await commit((d) => {
-      d.settings.privacidade = { ...(d.settings.privacidade || {}), [v]: !estava };
+      const lista = { ...(d.settings.privacidade || {}) };
+      // Os blocos desta tela saem: quem tocou no olho da tela quis mandar
+      // nela inteira, e uma escolha antiga de bloco sobrevivendo aqui faria
+      // um valor teimar em aparecer sem explicação.
+      for (const k of Object.keys(lista)) if (!k.startsWith('tela:')) delete lista[k];
+      lista[chave] = !estava;
+      d.settings.privacidade = lista;
     });
   },
 

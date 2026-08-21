@@ -49,11 +49,38 @@ let esconder = false;
  * sem ninguém entender por quê.
  */
 let escopos = {};
+let telaAtual = 'painel';
 
-const escondido = (escopo) => (escopo in escopos ? escopos[escopo] : esconder);
+/**
+ * Está escondido? A resposta desce do mais específico para o mais geral.
+ *
+ *   1. o bloco, se ele tiver escolha própria
+ *   2. a tela, se ela tiver
+ *   3. o olho geral
+ *
+ * É isso que faz "o último apertado manda" ser previsível: o que você tocou
+ * por último é sempre o mais específico, e ele ganha.
+ */
+function escondido(escopo) {
+  if (escopo && escopo in escopos) return escopos[escopo];
+  const daTela = `tela:${telaAtual}`;
+  if (daTela in escopos) return escopos[daTela];
+  return esconder;
+}
 
 /** Valor formatado, respeitando o olho fechado. */
-const m = (cents, fn = brl) => (esconder ? '••••' : fn(cents));
+/**
+ * Todo dinheiro da tela passa por aqui — e é por isso que ele consulta a tela.
+ *
+ * A primeira versão da privacidade por bloco pedia um botão em cada valor, e
+ * eu esqueci vários: o herói da dívida, o "a pagar" do cartão, as listas. Ir
+ * de memória marcando um por um é justamente o método que falha.
+ *
+ * Aqui o padrão é o olho da TELA. Quem esconde a tela esconde todo dinheiro
+ * dela, inclusive o que eu esquecer de marcar amanhã — a proteção passa a ser
+ * por construção, não por atenção.
+ */
+const m = (cents, fn = brl) => (escondido(null) ? '••••' : fn(cents));
 
 /**
  * Um valor com o olho do próprio escopo.
@@ -65,6 +92,16 @@ function olho(app, escopo, textoPronto, tag = 'span') {
   const oculto = escondido(escopo);
   return `<${tag} class="valor-olho">${oculto ? '••••' : textoPronto}</${tag}>`;
 }
+
+/**
+ * Como `m`, mas obedecendo ao olho de um escopo.
+ *
+ * Existe para as LISTAS. Ali o olho não pode ficar em cada linha — seriam
+ * quarenta botões numa tela — então um só, no cabeçalho do bloco, manda na
+ * lista inteira. É o que a pessoa quer de verdade: esconder "os lançamentos",
+ * não esconder o terceiro lançamento.
+ */
+const mE = (escopo, cents, fn = brl) => (escondido(escopo) ? '••••' : fn(cents));
 
 /** O botão de esconder de um bloco. Fica no cabeçalho dele, não no valor. */
 function botaoOlho(escopo) {
@@ -158,6 +195,7 @@ function ofertaTour() {
 export function render(app) {
   esconder = app.privacy;
   escopos = app.doc.settings?.privacidade || {};
+  telaAtual = app.screen || 'painel';
 
   if (onboardingPendente(app.doc)) {
     document.getElementById('app').innerHTML = `
@@ -243,7 +281,14 @@ function header(app, { voltar } = {}) {
     </div>
     <div class="acts">
       <button class="ib" data-act="tema" title="Tema" aria-label="Trocar tema">${icon('lua')}</button>
-      <button class="ib" data-act="privacidade" title="Esconder valores" aria-label="Esconder valores">${icon('escudo')}</button>
+      <button class="ib ${escondido(null) ? 'oculto' : ''}" data-act="privacidade-tela"
+        title="Esconder os valores desta tela" aria-label="Esconder os valores desta tela">
+        ${icon(escondido(null) ? 'escudoOk' : 'escudo')}
+      </button>
+      <button class="ib ${app.privacy ? 'oculto' : ''}" data-act="privacidade"
+        title="Esconder em todas as telas" aria-label="Esconder em todas as telas">
+        ${icon('cadeado')}
+      </button>
       <button class="ib ${app.view.avisos.length ? 'tem-aviso' : ''}" data-act="central-avisos"
         title="Avisos" aria-label="Avisos${app.view.avisos.length ? ` · ${app.view.avisos.length}` : ''}">
         ${icon('sino')}${app.view.avisos.length
@@ -294,8 +339,8 @@ function painel(app) {
 
   const hero = temDivida
     ? `<div class="hero" style="margin-top:16px">
-        <div class="top"><span class="lbl">Sua dívida</span></div>
-        <div class="big ser">${m(v.dividaTotalCents, brlShort)}</div>
+        <div class="top"><span class="lbl">Sua dívida</span>${botaoOlho("painel-divida")}</div>
+        <div class="big ser">${olho(app, "painel-divida", m(v.dividaTotalCents, brlShort))}</div>
         <div class="prog"><i style="width:${(v.progresso * 100).toFixed(0)}%"></i></div>
         <div class="foot">
           <span class="acc">${v.progresso > 0.005 ? `${(v.progresso * 100).toFixed(0)}% do caminho` : 'começo do plano'}${v.plano?.done ? ` · livre em ${formatMonthKey(v.plano.freeMonth)}` : ' · sem data ainda'}</span>
@@ -303,8 +348,8 @@ function painel(app) {
         </div>
       </div>`
     : `<div class="hero">
-        <div class="top"><span class="lbl">Livre para gastar${v.proximaEntrada ? ` até ${formatShort(v.proximaEntrada)}` : ''}</span></div>
-        <div class="big ser">${m(v.livre.cents, brlShort)}</div>
+        <div class="top"><span class="lbl">Livre para gastar${v.proximaEntrada ? ` até ${formatShort(v.proximaEntrada)}` : ''}</span>${botaoOlho("painel-livre")}</div>
+        <div class="big ser">${olho(app, "painel-livre", m(v.livre.cents, brlShort))}</div>
         <div class="foot">
           <span class="acc">${m(v.livre.perDayCents, (c) => brl(c))} por dia · ${v.livre.days} dias</span>
         </div>
@@ -347,7 +392,7 @@ function painel(app) {
 
   <button class="ze-barra" data-act="falar">
     <span class="ze-mic">${icon('microfone')}</span>
-    <span class="ze-txt">Fala aí, o Zé tá ouvindo?</span>
+    <span class="ze-txt">Fala aí, o Zé tá ouvindo</span>
   </button>
 
   <div class="quick">
@@ -385,7 +430,7 @@ function painel(app) {
 
   ${v.cartoes.length ? `
   <div class="sec">
-    <div class="sh"><h3>Meus cartões</h3><a data-go="cartoes">Todos ${v.cartoes.length}</a></div>
+    <div class="sh"><h3>Meus cartões</h3>${botaoOlho("cartoes")}<a data-go="cartoes">Todos ${v.cartoes.length}</a></div>
     <div class="cscroll">${v.cartoes.map(cartaoMini).join('')}</div>
   </div>` : ''}
 
@@ -396,7 +441,7 @@ function painel(app) {
   </div>` : ''}
 
   <div class="sec">
-    <div class="sh"><h3>Últimos lançamentos</h3><a data-act="novo">Lançar</a></div>
+    <div class="sh"><h3>Últimos lançamentos</h3>${botaoOlho("lancamentos")}<a data-act="novo">Lançar</a></div>
     ${v.lancamentos.length
       ? `<div class="list">${v.lancamentos.slice(0, 8).map((t) => linha(t, v)).join('')}</div>`
       : `<div class="empty">Nada lançado ainda.<br>Toque em <b>Lançar</b> para começar.</div>`}
@@ -481,33 +526,33 @@ function consultor(v) {
 
   if (v.plano && !v.plano.viable) {
     return diz('red', 'O que isso quer dizer',
-      `Sobram ${brl(v.orcamentoDivida)} e os mínimos pedem ${brl(v.minimosCents)}.`,
+      `Sobram ${m(v.orcamentoDivida)} e os mínimos pedem ${m(v.minimosCents)}.`,
       'Nesta conta não existe plano que feche. Ou entra mais dinheiro, ou corta gasto fixo, ou você troca a dívida cara por uma mais barata. A tela de Dívidas mostra os três caminhos.');
   }
 
   if (v.jurosMesCents > 0 && v.orcamentoDivida > 0 && v.jurosMesCents > v.orcamentoDivida * 0.6) {
     return diz('red', 'O que isso quer dizer',
-      `Dos ${brl(v.orcamentoDivida)} que sobram, ${brl(v.jurosMesCents)} vão embora só em juros.`,
+      `Dos ${m(v.orcamentoDivida)} que sobram, ${m(v.jurosMesCents)} vão embora só em juros.`,
       'Você paga e a dívida quase não anda. Enquanto o rotativo estiver de pé, é assim todo mês.');
   }
 
   if (v.projecao.firstNegative) {
     return diz('amber', 'Atenção no caixa',
       `Sua conta fica negativa em ${formatShort(v.projecao.firstNegative.date)}.`,
-      `Faltam ${brl(Math.abs(v.projecao.firstNegative.cents))} nesse dia. Dá tempo de resolver: adie o que der, antecipe entrada ou corte agora.`);
+      `Faltam ${m(Math.abs(v.projecao.firstNegative.cents))} nesse dia. Dá tempo de resolver: adie o que der, antecipe entrada ou corte agora.`);
   }
 
   if (v.piorCategoria) {
     const c = v.piorCategoria;
     return diz('amber', 'Ritmo do mês',
       `${c.name} já consumiu ${percent(c.ratio, 0)} do teto${c.breakDate ? ` e estoura dia ${parts(c.breakDate).d}` : ''}.`,
-      `No ritmo de hoje você gasta ${brl(c.perDayCents)} por dia nessa categoria. Para fechar o mês, ${brl(c.safePerDayCents)} por dia.`);
+      `No ritmo de hoje você gasta ${m(c.perDayCents)} por dia nessa categoria. Para fechar o mês, ${m(c.safePerDayCents)} por dia.`);
   }
 
   if (v.plano?.done) return balaoDoPlano(v);
 
   return diz('jade', 'Onde você está',
-    `Você tem ${brl(v.livre.cents)} livres até ${v.proximaEntrada ? formatShort(v.proximaEntrada) : 'o fim do período'}.`,
+    `Você tem ${m(v.livre.cents)} livres até ${v.proximaEntrada ? formatShort(v.proximaEntrada) : 'o fim do período'}.`,
     'Isso já é o que sobra depois de honrar fatura, contas fixas e parcelas do período.');
 }
 
@@ -541,7 +586,7 @@ function balaoDoPlano(v) {
         <div class="k eb" style="color:var(--jade)">Onde você está</div>
         <div class="q ser">No ritmo de hoje você fica livre em ${esc(formatMonthKey(p.freeMonth))}.</div>
         <div class="p">São ${p.monthsCount} ${p.monthsCount === 1 ? 'mês' : 'meses'} pagando
-          ${esc(brl(v.orcamentoDivida))}. Cada real a mais por mês antecipa essa data.</div>
+          ${esc(m(v.orcamentoDivida))}. Cada real a mais por mês antecipa essa data.</div>
         <svg class="plano-linha" viewBox="0 0 ${largura} ${altura}" preserveAspectRatio="none" aria-hidden="true">
           <polyline points="${pontos.join(' ')}" fill="none" stroke="var(--ouro)" stroke-width="2.2"
             stroke-linecap="round" stroke-linejoin="round"/>
@@ -549,7 +594,7 @@ function balaoDoPlano(v) {
         </svg>
         <div class="chart-eixo">
           <span>hoje · ${m(p.months[0]?.totalCents || 0, brlShort)}</span>
-          <span>${esc(formatMonthKey(p.freeMonth))} · R$ 0</span>
+          <span>${esc(formatMonthKey(p.freeMonth))} · quitado</span>
         </div>
         <span class="dobra-nota">toque para ver mês a mês e quais dívidas entram</span>
       </div>
@@ -604,7 +649,7 @@ function cartaoMini(c) {
     <div class="chip3"></div>
     <div class="n2">•• •• •• ${esc(String(c.id).slice(-4).padStart(4, '0'))}</div>
     <div class="bot">
-      <div class="hold">${c.overdue ? 'Em atraso' : 'A pagar'}<b>${m(valor)}</b></div>
+      <div class="hold">${c.overdue ? 'Em atraso' : 'A pagar'}<b>${mE('cartoes', valor)}</b></div>
       ${c.overdue ? `<div style="font-size:10px;opacity:.85" class="n2">${percent(c.overdue.monthlyRate, 1)}/mês</div>` : ''}
     </div>
   </button>`;
@@ -628,7 +673,7 @@ function linha(t, v, { acao = 'editar' } = {}) {
       ])}</div>
     </div>
     <div class="rt">
-      <div class="amt num ${positivo ? 'pos' : ''}">${m(t.amountCents, (c) => formatCents(c, { sign: true }))}</div>
+      <div class="amt num ${positivo ? 'pos' : ''}">${mE('lancamentos', t.amountCents, (c) => formatCents(c, { sign: true }))}</div>
     </div>
   </button>`;
 }
@@ -651,7 +696,7 @@ function cartoes(app) {
   </div>
 
   <div class="sec">
-    <div class="sh"><h3>Contas</h3><a data-act="nova-conta">Adicionar</a></div>
+    <div class="sh"><h3>Contas</h3>${botaoOlho("contas")}<a data-act="nova-conta">Adicionar</a></div>
     ${contas.length ? `<div class="list">${contas.map((a) => `
       <button class="row" data-act="editar-conta" data-id="${esc(a.id)}">
         <div class="ic ${a.balanceCents < 0 ? 'r' : 'j'}">${icon(a.type === 'savings' ? 'cofre' : 'banco')}</div>
@@ -663,7 +708,7 @@ function cartoes(app) {
   </div>
 
   <div class="sec">
-    <div class="sh"><h3>Cartões de crédito</h3><a data-act="novo-cartao">Adicionar</a></div>
+    <div class="sh"><h3>Cartões de crédito</h3>${botaoOlho("faturas")}<a data-act="novo-cartao">Adicionar</a></div>
     ${v.cartoes.length
       ? `<div class="cscroll">${v.cartoes.map(cartaoMini).join('')}</div>
          ${v.cartoes.map((c) => faturaCartao(c, v)).join('')}`
@@ -688,7 +733,7 @@ function cartoes(app) {
 
   ${v.vales.length ? `
   <div class="sec">
-    <div class="sh"><h3>Vales e benefícios</h3><a>${m(sum(v.vales.map((x) => Math.max(0, x.saldoCents))), brlShort)} disponível</a></div>
+    <div class="sh"><h3>Vales e benefícios</h3>${botaoOlho("vales")}<a>${m(sum(v.vales.map((x) => Math.max(0, x.saldoCents))), brlShort)} disponível</a></div>
     <div class="list">${v.vales.map(valeLinha).join('')}</div>
   </div>` : ''}
 
@@ -700,7 +745,7 @@ function cartoes(app) {
 
   ${v.compras.length ? `
   <div class="sec">
-    <div class="sh"><h3>Compras parceladas</h3></div>
+    <div class="sh"><h3>Compras parceladas</h3>${botaoOlho("parcelas")}</div>
     <div class="list">${v.compras.map((c) => `
       <div class="row">
         <div class="ic a">${icon('lista')}</div>
@@ -741,7 +786,7 @@ function valeLinha(x) {
     <div class="ic ${aperta ? 'r' : 'j'}">${icon('cartao')}</div>
     <div class="bd"><div class="t">${esc(x.nome)}</div>
       <div class="s">${pilulasDaLinha([quando, x.gastoCents ? `${brlShort(x.gastoCents)} usados` : null])}</div></div>
-    <div class="rt"><div class="amt num ${aperta ? 'neg' : 'pos'}">${m(Math.max(0, x.saldoCents))}</div>
+    <div class="rt"><div class="amt num ${aperta ? 'neg' : 'pos'}">${mE('vales', Math.max(0, x.saldoCents))}</div>
       <div class="dt">no vale</div></div>
     ${total > 0 ? `<div style="flex-basis:100%;padding:2px 0 0">
       ${termometro({ fracao: restaFracao, marca: cicloFracao, alerta: aperta })}
@@ -760,11 +805,11 @@ function faturaCartao(c, v) {
     </div>
     <div class="ft" style="margin:0 0 10px">
       <span class="s" style="font-size:11px;color:var(--muted)">Fatura aberta · fecha ${formatShort(c.cycle.closeDate)}</span>
-      <b class="num">${m(c.openCents)}</b>
+      <b class="num">${mE('faturas', c.openCents)}</b>
     </div>
     ${s ? `<div class="ft" style="margin:0 0 10px">
       <span class="s" style="font-size:11px;color:${c.nextStatementPaga ? 'var(--positivo)' : 'var(--muted)'}">${c.nextStatementPaga ? `Paga · vencia ${formatShort(s.dueDate)}` : `A pagar · vence ${formatShort(s.dueDate)}`}</span>
-      <b class="num">${m(s.totalCents)}</b>
+      <b class="num">${mE('faturas', s.totalCents)}</b>
     </div>
     <div class="btns" style="margin:0 0 10px">
       <button class="btn ${c.nextStatementPaga ? 'ghost' : 'primary'}" style="width:100%;padding:9px"
@@ -775,7 +820,7 @@ function faturaCartao(c, v) {
     </div>` : ''}
     ${c.overdue ? `<div class="nudge crit" style="margin:10px 0 0">
       <span class="ic">${icon('alerta')}</span>
-      <div><b>Fatura em atraso · ${m(Math.abs(c.overdue.balanceCents))}${c.overdue.cardBlocked ? ' · bloqueado' : ''}</b>
+      <div><b>Fatura em atraso · ${mE('faturas', Math.abs(c.overdue.balanceCents))}${c.overdue.cardBlocked ? ' · bloqueado' : ''}</b>
       <i>${c.overdue.agreement
         ? `acordo ${c.overdue.agreement.form === 'avista' ? 'à vista' : `em ${c.overdue.agreement.installments}x`} · sem juro novo`
         : `rotativo a ${percent(c.overdue.monthlyRate, 1)} ao mês — ${percent(Math.pow(1 + c.overdue.monthlyRate, 12) - 1, 0)} ao ano`}</i></div>
@@ -783,7 +828,7 @@ function faturaCartao(c, v) {
     ${c.limitCents ? `
     <div class="bar" style="margin-top:12px"><i style="width:${(c.usedRatio * 100).toFixed(0)}%;background:${usoCor}"></i></div>
     <div class="ft"><span style="font-size:10.5px;color:var(--muted)">limite usado</span>
-      <span style="font-size:10.5px;color:var(--muted)">${m(c.availableCents, brlShort)} livre de ${m(c.limitCents, brlShort)}</span></div>` : ''}
+      <span style="font-size:10.5px;color:var(--muted)">${mE('faturas', c.availableCents, brlShort)} livre de ${mE('faturas', c.limitCents, brlShort)}</span></div>` : ''}
   </div>`;
 }
 
@@ -848,7 +893,7 @@ function barras(meses) {
     ${meses.map((b) => `
       <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%">
         <div style="width:100%;border-radius:5px 5px 2px 2px;background:${b.cents ? 'var(--ouro)' : 'var(--line)'};
-             height:${Math.max(3, (b.cents / maior) * 78)}%" title="${esc(brl(b.cents))}"></div>
+             height:${Math.max(3, (b.cents / maior) * 78)}%" title="${esc(m(b.cents))}"></div>
         <span style="font-size:8.5px;color:var(--muted);letter-spacing:.03em">${monthAbbr(b.month).slice(0, 3)}</span>
       </div>`).join('')}
   </div>
@@ -867,7 +912,7 @@ function historicoBarras(meses) {
       <button data-act="ver-mes" data-month="${esc(b.month)}"
         style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%;background:none;border:0;padding:0;cursor:pointer">
         <div style="width:100%;border-radius:5px 5px 2px 2px;background:${b.aberto ? 'var(--line)' : b.cents ? 'var(--blue)' : 'var(--line)'};
-             height:${Math.max(3, (b.cents / maior) * 78)}%" title="${esc(brl(b.cents))}${b.aberto ? ' · mês em aberto' : ''}"></div>
+             height:${Math.max(3, (b.cents / maior) * 78)}%" title="${esc(m(b.cents))}${b.aberto ? ' · mês em aberto' : ''}"></div>
         <span style="font-size:8.5px;color:var(--muted);letter-spacing:.03em">${monthAbbr(b.month).slice(0, 3)}</span>
       </button>`).join('')}
   </div>
@@ -970,7 +1015,7 @@ function calendarioMes(v) {
     const marcas = marcasPorDia.get(d.day) || [];
     const titulo = [
       `dia ${d.day}`,
-      d.cents === 0 ? 'sem lançamento' : brl(d.cents),
+      d.cents === 0 ? 'sem lançamento' : m(d.cents),
       ...marcas.map((mk) => mk.texto),
     ].join(' · ');
 
@@ -1014,8 +1059,8 @@ function dividas(app) {
   ${header(app, { voltar: 'tudo' })}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Você deve hoje</span></div>
-    <div class="big ser">${m(v.dividaTotalCents, brlShort)}</div>
+    <div class="top"><span class="lbl">Você deve hoje</span>${botaoOlho("dividas-total")}</div>
+    <div class="big ser">${olho(app, "dividas-total", m(v.dividaTotalCents, brlShort))}</div>
     ${v.picoCents > 0 ? `
     <div class="anel-linha" style="margin-top:16px">
       ${anel({
@@ -1073,7 +1118,7 @@ function dividas(app) {
   </div>
 
   <div class="sec">
-    <div class="sh"><h3>A ordem certa de pagar</h3></div>
+    <div class="sh"><h3>A ordem certa de pagar</h3>${botaoOlho("dividas-lista")}</div>
     <div class="segs">
       <button class="seg ${(app.doc.settings.debtMethod || 'avalanche') === 'avalanche' ? 'on' : ''}" data-act="metodo" data-v="avalanche">Maior juro</button>
       <button class="seg ${app.doc.settings.debtMethod === 'snowball' ? 'on' : ''}" data-act="metodo" data-v="snowball">Menor saldo</button>
@@ -1107,7 +1152,7 @@ function dividas(app) {
   ${ganho && ganho.savedInterestCents > 0 ? `
   <div class="sec"><div class="say">
     <div class="k eb" style="color:var(--jade)">O que o plano vale</div>
-    <div class="q ser">Seguindo esta ordem você economiza ${brl(ganho.savedInterestCents)} e sai ${ganho.savedMonths} meses antes.</div>
+    <div class="q ser">Seguindo esta ordem você economiza ${m(ganho.savedInterestCents)} e sai ${ganho.savedMonths} meses antes.</div>
     <div class="p">A comparação é contra pagar só o mínimo de cada dívida — que é o caminho natural de quem não tem plano.</div>
   </div></div>` : ''}
 
@@ -1129,7 +1174,7 @@ function dividas(app) {
       <button class="row" data-go="analise">
         <div class="ic">${icon('grafico')}</div>
         <div class="bd"><div class="t">Cortar gasto fixo</div>
-          <div class="s">cada ${brl(10000)} a menos por mês antecipa a saída</div></div>
+          <div class="s">cada ${m(10000)} a menos por mês antecipa a saída</div></div>
         <span class="arr">${icon('seta')}</span>
       </button>
       <button class="row" data-go="recebimentos">
@@ -1167,10 +1212,10 @@ function dividaCard(d, i, plano, v) {
     </div>
     <div class="ft" style="margin:0">
       <span style="font-size:11px;color:var(--muted)">Saldo</span>
-      <b class="num" style="font-size:17px">${m(Math.abs(d.balanceCents))}</b>
+      <b class="num" style="font-size:17px">${mE('dividas-lista', Math.abs(d.balanceCents))}</b>
     </div>
     <div class="ft"><span style="font-size:11px;color:var(--muted)">Custa parada</span>
-      <span class="num" style="font-size:12px;color:var(--red)">${m(Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
+      <span class="num" style="font-size:12px;color:var(--red)">${mE('dividas-lista', Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
     ${quitacao ? `<div class="ft"><span style="font-size:11px;color:var(--muted)">Quita em</span>
       <span class="num" style="font-size:12px;color:var(--positivo)">${formatMonthKey(quitacao)}</span></div>` : ''}
     ${d.agreement || d.cardBlocked ? `<div class="legend" style="margin-top:8px">
@@ -1380,7 +1425,7 @@ function analise(app) {
 
   ${v.orcamentoVariavel.length ? `
   <div class="sec">
-    <div class="sh"><h3>Tetos do mês</h3><a data-act="tetos">Ajustar</a></div>
+    <div class="sh"><h3>Tetos do mês</h3>${botaoOlho("tetos")}<a data-act="tetos">Ajustar</a></div>
     ${v.orcamentoGeral ? `<div class="panel" style="margin-bottom:10px">
       <div class="ft" style="margin:0 0 8px">
         <span style="font-size:12.5px">${m(v.orcamentoGeral.spentCents)} de ${m(v.orcamentoGeral.limitCents)}</span>
@@ -1394,7 +1439,7 @@ function analise(app) {
     ${v.orcamentoVariavel.map(categoria).join('')}
   </div>` : `
   <div class="sec">
-    <div class="sh"><h3>Tetos do mês</h3></div>
+    <div class="sh"><h3>Tetos do mês</h3>${botaoOlho("tetos")}</div>
     <div class="empty">Sem teto definido.<br>Sem teto o app não consegue avisar quando o ritmo está errado.
       <div class="btns" style="justify-content:center"><button class="btn primary" data-act="tetos">Definir tetos</button></div>
     </div>
@@ -1402,7 +1447,7 @@ function analise(app) {
 
   ${v.categoriasFixas.length ? `
   <div class="sec">
-    <div class="sh"><h3>Gastos fixos</h3><a>sem meta — valor e dia certos</a></div>
+    <div class="sh"><h3>Gastos fixos</h3>${botaoOlho("fixos")}<a>sem meta — valor e dia certos</a></div>
     <div class="list">${v.categoriasFixas.map((c) => `
       <div class="row">
         <div class="ic">${icon('relogio')}</div>
@@ -1437,7 +1482,7 @@ function analise(app) {
         <div class="bd"><div class="t">${esc(f.name)}</div>
           <div class="s">${f.type === 'duplicada'
             ? `cobrado duas vezes em ${f.daysApart} ${f.daysApart === 1 ? 'dia' : 'dias'}`
-            : `subiu de ${brl(f.fromCents)} para ${brl(f.toCents)}`}</div></div>
+            : `subiu de ${m(f.fromCents)} para ${m(f.toCents)}`}</div></div>
         <div class="rt"><div class="amt num" style="color:var(--red)">${m(f.yearlyCents, brlShort)}</div><div class="dt">no ano</div></div>
       </div>`).join('')}</div>
   </div>` : ''}
@@ -1463,10 +1508,10 @@ function analise(app) {
           ? `Média das categorias essenciais nos últimos ${s.minimumCost.months} meses. É a sua linha de água.`
           : 'Preciso de pelo menos 3 meses de histórico para ter confiança neste número.')}
       ${indicador('Reserva de emergência', `${s.emergency.months.toFixed(1)} meses`,
-        `Você tem ${brl(s.emergency.savedCents)} guardados. Para ${s.emergency.targetMonths} meses faltam ${brl(s.emergency.missingCents)}.`)}
+        `Você tem ${m(s.emergency.savedCents)} guardados. Para ${s.emergency.targetMonths} meses faltam ${m(s.emergency.missingCents)}.`)}
       ${indicador('Juros sobre a renda', percent(s.interestRatio, 1),
         s.monthlyInterestCents > 0
-          ? `${brl(s.monthlyInterestCents)} por mês só de juros. Esse dinheiro não compra nada.`
+          ? `${m(s.monthlyInterestCents)} por mês só de juros. Esse dinheiro não compra nada.`
           : 'Você não paga juros hoje. É a melhor posição possível.')}
       ${indicador('Para onde vai o dinheiro',
         `${percent(s.allocation.essentialRatio, 0)} essencial`,
@@ -1545,10 +1590,10 @@ function categoria(c) {
         <span class="am num">${m(c.spentCents, brlShort)} <span style="color:var(--muted);font-weight:400">de ${m(c.limitCents, brlShort)}</span></span></div>
       ${barraRitmo(c)}
       <div class="note">${c.exceeded
-        ? `estourou em ${brl(c.spentCents - c.limitCents)}`
+        ? `estourou em ${m(c.spentCents - c.limitCents)}`
         : c.breakDate
-          ? `no ritmo de hoje estoura dia ${parts(c.breakDate).d} · ${brl(c.safePerDayCents)}/dia para fechar`
-          : `${brl(c.remainingCents)} restantes · ${brl(c.safePerDayCents)}/dia`}</div>
+          ? `no ritmo de hoje estoura dia ${parts(c.breakDate).d} · ${m(c.safePerDayCents)}/dia para fechar`
+          : `${m(c.remainingCents)} restantes · ${m(c.safePerDayCents)}/dia`}</div>
     </div>
   </div>`;
 }
@@ -1602,7 +1647,7 @@ function curvaCaixa(proj) {
   ${negativo ? `<div class="nudge crit" style="margin-top:10px">
     <span class="ic">${icon('alerta')}</span>
     <div><b>Fica negativo em ${formatShort(proj.firstNegative.date)}</b>
-    <i>faltam ${brl(Math.abs(proj.firstNegative.cents))} nesse dia · são ${daysBetween(proj.days[0].date, proj.firstNegative.date)} dias para resolver</i></div>
+    <i>faltam ${m(Math.abs(proj.firstNegative.cents))} nesse dia · são ${daysBetween(proj.days[0].date, proj.firstNegative.date)} dias para resolver</i></div>
   </div>` : ''}`;
 }
 
@@ -1690,8 +1735,8 @@ function cofrinhos(app) {
   ${header(app, { voltar: 'tudo' })}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Guardado ao todo</span></div>
-    <div class="big ser">${m(v.guardadoCents, brlShort)}</div>
+    <div class="top"><span class="lbl">Guardado ao todo</span>${botaoOlho("cofrinhos-total")}</div>
+    <div class="big ser">${olho(app, "cofrinhos-total", m(v.guardadoCents, brlShort))}</div>
     <div class="foot"><span class="acc">${ativos.length} ativo${ativos.length === 1 ? '' : 's'} · ${m(mensal, brlShort)} por mês</span></div>
   </div>
 
@@ -1827,8 +1872,8 @@ function recebimentos(app) {
   ${header(app, { voltar: 'tudo' })}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Entrou este mês</span></div>
-    <div class="big ser">${m(v.rendaFixaCents + avulsosDoMes, brlShort)}</div>
+    <div class="top"><span class="lbl">Entrou este mês</span>${botaoOlho("recebimentos-total")}</div>
+    <div class="big ser">${olho(app, "recebimentos-total", m(v.rendaFixaCents + avulsosDoMes, brlShort))}</div>
     <div class="foot">
       <span class="acc">${rodape}</span>
     </div>
@@ -1920,7 +1965,7 @@ function revisao(app) {
       <div class="row">
         <div class="ic ${f.type === 'duplicada' ? 'r' : 'a'}">${icon('alerta')}</div>
         <div class="bd"><div class="t">${esc(f.name)}</div>
-          <div class="s">${f.type === 'duplicada' ? 'cobrança duplicada' : `preço subiu ${brl(f.deltaCents)}`}</div></div>
+          <div class="s">${f.type === 'duplicada' ? 'cobrança duplicada' : `preço subiu ${m(f.deltaCents)}`}</div></div>
         <div class="rt"><div class="amt num" style="color:var(--red)">${m(f.yearlyCents, brlShort)}</div><div class="dt">no ano</div></div>
       </div>`).join('')}</div>
   </div>` : ''}

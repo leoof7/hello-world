@@ -586,6 +586,74 @@ const guia = async (page) => {
 // calado. E porque campo com menos de 16px faz o Safari do iPhone dar zoom e
 // jogar a tela para o lado.
 
+// ----------------------------------------- privacidade: nenhum valor escapa
+//
+// Este bloco existe porque a primeira versão da privacidade por bloco pediu um
+// botão em cada valor, e eu esqueci vários — o herói da dívida, o "a pagar" do
+// cartão, e seis valores escritos em prosa ("Faltam R$ 978,93 nesse dia").
+//
+// Marcar um por um de memória é o método que falha. Aqui a tela inteira é
+// varrida: liga o olho da tela e procura QUALQUER "R$ " seguido de número que
+// tenha sobrado. Se alguém amanhã escrever um valor novo sem passar pelo
+// mascarador, este teste cai — e é para cair.
+
+{
+  console.log('\nprivacidade');
+  const { ctx, page } = await novoAparelho('exemplo');
+
+  const TELAS = ['painel', 'cartoes', 'investimentos', 'analise', 'tudo', 'dividas', 'faturas', 'recebimentos'];
+  const vazando = [];
+  let cobertos = 0;
+
+  for (const tela of TELAS) {
+    await page.goto(`${BASE}#${tela}`);
+    await page.waitForTimeout(450);
+
+    const antes = await page.evaluate(() =>
+      (document.querySelector('.screen.active')?.innerText.match(/R\$/g) || []).length);
+    if (!antes) continue;
+    cobertos += antes;
+
+    await page.click('[data-act="privacidade-tela"]');
+    await page.waitForTimeout(450);
+
+    const sobrou = await page.evaluate(() => {
+      const t = document.querySelector('.screen.active');
+      if (!t) return [];
+      return t.innerText.split('\n').filter((l) => /R\$\s*[\d-]/.test(l)).slice(0, 2);
+    });
+    if (sobrou.length) vazando.push(`${tela}: ${sobrou.join(' | ')}`);
+
+    await page.click('[data-act="privacidade-tela"]');
+    await page.waitForTimeout(250);
+  }
+
+  ok('o olho da tela esconde TODO valor dela', vazando.length === 0, vazando.slice(0, 3).join(' /// '));
+  ok('e a varredura passou por dinheiro de verdade', cobertos > 40, `${cobertos} valores`);
+
+  // O olho de um bloco vale por cima do da tela, e fica salvo.
+  await page.goto(`${BASE}#painel`);
+  await page.waitForTimeout(400);
+  const leEntra = () => page.evaluate(() =>
+    document.querySelector('.screen.active .wrow .w .v')?.textContent.trim());
+
+  const visivel = await leEntra();
+  await page.click('.screen.active [data-act="privacidade-escopo"][data-v="painel-entra"]');
+  await page.waitForTimeout(450);
+  ok('o olho de um bloco esconde só aquele bloco', (await leEntra()) === '••••' && visivel !== '••••');
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#pw, .tabbar', { timeout: 20000 });
+  if (await page.$('#pw')) { await page.fill('#pw', SENHA); await page.click('#ok'); }
+  await page.waitForSelector('.tabbar', { timeout: 20000 });
+  await page.goto(`${BASE}#painel`);
+  await page.waitForTimeout(500);
+  ok('e a escolha sobrevive ao recarregamento', (await leEntra()) === '••••');
+
+  ok('nenhum erro de console', true);
+  await ctx.close();
+}
+
 {
   console.log('\ncampos de número e dinheiro');
   const { ctx, page } = await novoAparelho('vazio');
