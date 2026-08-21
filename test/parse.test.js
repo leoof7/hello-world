@@ -294,3 +294,62 @@ test('não divide reais e centavos', () => {
 test('não divide quando só há um valor — dois lugares, uma compra', () => {
   assert.deepEqual(splitEntries('gastei 50 no mercado e farmacia'), ['gastei 50 no mercado e farmacia']);
 });
+
+// ------------------------------------------- dígito multiplicado por palavra
+//
+// "gastei 3 mil no notebook" era lido como R$ 3,00: o regex do inteiro achava
+// o "3", devolvia, e o "mil" nunca era olhado. Errar por mil vezes para baixo
+// é o pior erro silencioso possível num app de dinheiro — o número parece
+// plausível e ninguém confere.
+
+test('"3 mil" são três mil reais, não três', () => {
+  assert.equal(extractAmount('3 mil'), 300000);
+  assert.equal(extractAmount('gastei 3 mil no notebook'), 300000);
+  assert.equal(extractAmount('devo 3 mil no cartão'), 300000);
+});
+
+test('a escala decimal também vale', () => {
+  assert.equal(extractAmount('1,5 mil'), 150000);
+  assert.equal(extractAmount('R$ 10 mil'), 1000000);
+});
+
+test('milhão não é mil — comparar por regex confundia os dois', () => {
+  assert.equal(extractAmount('2 milhoes'), 200000000);
+});
+
+test('o resto depois da escala continua contando', () => {
+  assert.equal(extractAmount('2 mil e quinhentos'), 250000);
+  assert.equal(extractAmount('2 mil e quinhentos reais'), 250000);
+});
+
+test('o que já funcionava não mudou', () => {
+  assert.equal(extractAmount('85'), 8500);
+  assert.equal(extractAmount('45,90'), 4590);
+  assert.equal(extractAmount('1.234,56'), 123456);
+  assert.equal(extractAmount('tres mil'), 300000);
+  assert.equal(extractAmount('mil e duzentos'), 120000);
+});
+
+// --------------------------------------------------- lista com vírgula
+//
+// É assim que se lista de verdade: "aluguel 1200, luz 180, internet 120".
+
+test('vírgula separa itens de uma lista', () => {
+  assert.deepEqual(
+    splitEntries('aluguel 1200, luz 180, internet 120'),
+    ['aluguel 1200', 'luz 180', 'internet 120']
+  );
+});
+
+test('a vírgula do valor não parte o valor', () => {
+  assert.deepEqual(splitEntries('1.234,56 no mercado'), ['1.234,56 no mercado']);
+  assert.deepEqual(splitEntries('45,90 na padaria'), ['45,90 na padaria']);
+});
+
+test('lista sem valor nenhum continua sendo uma frase só', () => {
+  assert.deepEqual(splitEntries('comprei pão, leite e café'), ['comprei pão, leite e café']);
+});
+
+test('"2 mil e quinhentos" não é dividido pelo "e"', () => {
+  assert.deepEqual(splitEntries('2 mil e quinhentos no notebook'), ['2 mil e quinhentos no notebook']);
+});

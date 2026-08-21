@@ -11,7 +11,7 @@ import { parseEntry, splitEntries } from '../core/parse.js';
 import { expand } from '../core/installments.js';
 import { diasDoRecorrente, mensalDoRecorrente } from '../core/projection.js';
 import { learn } from '../core/categorize.js';
-import { KIND as KIND_DIVIDA, validateDebt, ativa } from '../core/debts.js';
+import { KIND as KIND_DIVIDA, validateDebt, ativa, somenteAtivas } from '../core/debts.js';
 import { KIND, TIPOS, validarCartao, permiteParcelar, ehBeneficio, ehDebito } from '../core/cards.js';
 import { podeComprar, custoDoHabito } from '../core/insights.js';
 import * as avisos from '../data/avisos.js';
@@ -1780,6 +1780,9 @@ async function editarDivida(id) {
   // coisa que faz desistir de cadastrar.
   let atual = {
     name: d0?.name || '',
+    // Nasce ativa: cadastrar uma dívida e ela não contar em nada seria pior
+    // que não cadastrar. Desligar é decisão, não padrão.
+    ativa: d0 ? ativa(d0) : true,
     kind: d0?.kind || KIND_DIVIDA.REVOLVING,
     saldo: Math.abs(d0?.balanceCents || 0),
     taxa: d0 ? String((d0.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
@@ -1800,6 +1803,8 @@ async function editarDivida(id) {
       erro || 'A taxa vem escrita na fatura e no extrato — procure "juros do rotativo" ou "juros do cheque especial". É ela que decide a ordem de pagamento.',
       [
         { name: 'name', label: 'Nome', type: 'text', value: atual.name, placeholder: 'Fatura atrasada · Nubank' },
+        { name: 'ativa', label: 'Contar esta dívida nas contas do mês', type: 'checkbox', value: atual.ativa,
+          hint: 'desmarque para ela ficar cadastrada mas sair de tudo: total, juro por dia, mínimo do mês, ordem de pagar e projeção. É o lugar da dívida em negociação ou que você contesta' },
         { name: 'kind', label: 'Tipo', type: 'select', value: atual.kind,
           options: [
             { value: KIND_DIVIDA.REVOLVING, label: 'Rotativo do cartão' },
@@ -1884,15 +1889,18 @@ async function editarDivida(id) {
       cardId: r.cardId || null,
       cardBlocked: r.cardId ? !!r.bloqueado : false,
       agreement: fezAcordo ? { madeOn: d0?.agreement?.madeOn || app.todayISO, installments: parcelasAcordo, form: r.acordoForma } : null,
+      active: !!r.ativa,
       since: d0?.since || app.todayISO,
     };
 
     await commit((d) => {
       d.debts = id ? d.debts.map((x) => (x.id === id ? { ...x, ...registro } : x)) : [...d.debts, registro];
-      const total = d.debts.reduce((a, x) => a + Math.abs(x.balanceCents), 0);
+      // O pico só conta o que está valendo — senão pausar uma dívida deixaria
+      // o marco de "metade paga" preso num pico que a pessoa nem acompanha.
+      const total = somenteAtivas(d.debts).reduce((a, x) => a + Math.abs(x.balanceCents), 0);
       if (total > (d.profile.debtPeakCents || 0)) d.profile.debtPeakCents = total;
     });
-    toast('Salvo.');
+    toast(registro.active ? 'Salvo.' : 'Salvo — pausada, fora das contas do mês.');
     return;
   }
 }

@@ -961,11 +961,6 @@ function dividaCard(d, i, plano, v) {
       <span style="font-size:11px;color:var(--muted)">Saldo</span>
       <b class="num" style="font-size:17px">${m(Math.abs(d.balanceCents))}</b>
     </div>
-    <div class="btns" style="margin:10px 0 0">
-      <button class="btn ghost" data-act="alternar-divida" data-id="${esc(d.id)}" style="width:100%;padding:9px;font-size:12.5px">
-        ${icon('relogio')} Pausar esta dívida
-      </button>
-    </div>
     <div class="ft"><span style="font-size:11px;color:var(--muted)">Custa parada</span>
       <span class="num" style="font-size:12px;color:var(--red)">${m(Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
     ${quitacao ? `<div class="ft"><span style="font-size:11px;color:var(--muted)">Quita em</span>
@@ -980,6 +975,11 @@ function dividaCard(d, i, plano, v) {
         Provavelmente um valor em reais foi digitado no campo de porcentagem. Toque para corrigir.</i></div>
       <span class="arr">${icon('seta')}</span>
     </button>` : ''}
+    <div class="btns" style="margin:12px 0 0">
+      <button class="btn ghost" data-act="alternar-divida" data-id="${esc(d.id)}" style="width:100%;padding:9px;font-size:12.5px">
+        ${icon('relogio')} Pausar — tirar das contas do mês
+      </button>
+    </div>
   </div>`;
 }
 

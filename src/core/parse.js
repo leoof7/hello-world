@@ -59,11 +59,31 @@ export function extractAmount(text) {
   const reaisCentavos = t.match(/(\d+)\s*(?:reais|real|conto|pila)\s*e\s*(\d+)\s*centavos?/);
   if (reaisCentavos) return Number(reaisCentavos[1]) * 100 + Number(reaisCentavos[2]);
 
-  // 3) inteiro simples: "85", "1200", "r$ 85"
+  // 3) dígito multiplicado por palavra: "3 mil", "1,5 mil", "2 milhões".
+  //
+  // Vem ANTES do inteiro simples de propósito. Enquanto não vinha, "gastei
+  // 3 mil no notebook" era lido como R$ 3,00 — o regex do inteiro achava o
+  // "3", devolvia, e o "mil" nunca era olhado. Errar por mil vezes para baixo
+  // num app de dinheiro é o pior tipo de erro silencioso: o número parece
+  // plausível e ninguém confere.
+  const multiplicado = t.match(/(?:r\$\s*)?(\d+(?:[.,]\d+)?)\s*(mil|k|milhao|milhoes)\b(.*)$/);
+  if (multiplicado) {
+    const base = Number(multiplicado[1].replace(',', '.'));
+    // Comparação exata, não regex: `/mil/.test('milhoes')` dá verdadeiro e
+    // faria dois milhões virarem dois mil.
+    const escala = multiplicado[2];
+    const fator = escala === 'mil' || escala === 'k' ? 1000 : 1000000;
+
+    // "2 mil e quinhentos" — o resto depois da escala ainda vale.
+    const resto = wordsToNumber(multiplicado[3] || '');
+    return Math.round(base * fator * 100) + (resto ? resto * 100 : 0);
+  }
+
+  // 4) inteiro simples: "85", "1200", "r$ 85"
   const inteiro = t.match(/(?:r\$\s*)?\b(\d{1,7})\b(?!\s*[x×])/);
   if (inteiro) return Number(inteiro[1]) * 100;
 
-  // 4) por extenso
+  // 5) por extenso
   const extenso = wordsToNumber(t);
   if (extenso) return extenso * 100;
 
@@ -202,11 +222,18 @@ export function splitEntries(text) {
   const original = String(text || '');
   const numeros = Object.keys(UNIDADES).join('|');
 
-  // Divide no "e" — menos quando o que vem depois é a segunda metade de um
-  // número ("oitenta E cinco", "85 reais E 50 centavos"). Na dúvida não
-  // divide: uma frase inteira mal lida é melhor que duas frases erradas.
+  // Divide no "e", no ";" e na vírgula — menos quando o que vem depois é a
+  // segunda metade de um número ("oitenta E cinco", "85 reais E 50 centavos",
+  // "2 mil E quinhentos"). Na dúvida não divide: uma frase inteira mal lida é
+  // melhor que duas frases erradas.
+  //
+  // A vírgula entrou porque é assim que se lista de verdade — "aluguel 1200,
+  // luz 180, internet 120". Ela não parte valor: "1.234,56" não tem espaço
+  // depois da vírgula, e o separador exige o espaço.
   const separador = new RegExp(
-    '\\s+e\\s+(?!(?:' + numeros + ')\\b|\\d+\\s*centavos?\\b)|\\s*;\\s*',
+    '\\s+e\\s+(?!(?:' + numeros + ')\\b|mil\\b|\\d+\\s*centavos?\\b)'
+    + '|\\s*;\\s*'
+    + '|,\\s+(?!\\d)',
     'i',
   );
 

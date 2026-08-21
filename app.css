@@ -3,6 +3,14 @@
    empilhados, e os números-herói em serifada. Sem tab bar com botão no meio. */
 
 :root {
+  /* Quanto respiro fica abaixo da barra de abas.
+     `max` e não `20px + env(...)`: somar os dois empilha a folga do desenho
+     em cima da faixa do indicador de home, e no iPhone isso viravam 54px de
+     tela preta perdida embaixo do menu. O que se quer é o MAIOR entre o
+     respiro mínimo e a área que o aparelho reserva — nunca a soma.
+     Tudo que mora perto do rodapé lê daqui, para não sair do lugar sozinho. */
+  --rodape: max(14px, env(safe-area-inset-bottom, 0px));
+
   --r-sm: 12px; --r-md: 18px; --r-lg: 24px;
   --sh-sm: 0 2px 8px rgba(0,0,0,.14), 0 1px 2px rgba(0,0,0,.10);
   --sh-md: 0 8px 24px rgba(0,0,0,.20), 0 2px 4px rgba(0,0,0,.10);
@@ -95,7 +103,9 @@ body {
 .screens { flex: 1; position: relative; overflow: hidden; }
 .screen {
   position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden;
-  padding: max(24px, env(safe-area-inset-top)) 18px 116px;
+  /* O fundo acompanha a barra pela mesma variável: com número fixo, mexer na
+     barra deixava o último cartão escondido atrás dela. */
+  padding: max(24px, env(safe-area-inset-top)) 18px calc(86px + var(--rodape));
   display: none; -webkit-overflow-scrolling: touch;
 }
 .screen.active { display: block; }
@@ -231,7 +241,7 @@ body {
 .ze-txt { font-size: 14px; font-weight: 500; color: rgba(255,255,255,.92); }
 
 .ze-fab {
-  position: fixed; right: 18px; bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  position: fixed; right: 18px; bottom: calc(70px + var(--rodape));
   width: 56px; height: 56px; border-radius: 50%; border: 0; z-index: 60; cursor: pointer;
   background: var(--jade); color: var(--on-jade); display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 0 rgba(0,0,0,.18), 0 8px 20px rgba(0,0,0,.3);
@@ -476,7 +486,7 @@ body {
 
 /* ---------- tabbar ---------- */
 .tabbar {
-  position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 14px calc(20px + env(safe-area-inset-bottom));
+  position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 14px var(--rodape);
   z-index: 50; background: linear-gradient(180deg, transparent 0%, var(--bg) 45%);
 }
 .tabbar .in {
@@ -500,7 +510,7 @@ body {
   background: rgba(0,0,0,.45); padding: 0;
 }
 .sheet .card {
-  background: var(--bg); border-radius: 26px 26px 0 0; padding: 22px 18px calc(26px + env(safe-area-inset-bottom));
+  background: var(--bg); border-radius: 26px 26px 0 0; padding: 22px 18px calc(12px + var(--rodape));
   width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto;
 }
 .sheet h4 { font-size: 17px; font-weight: 600; letter-spacing: -.02em; margin-bottom: 6px; }
@@ -561,7 +571,7 @@ body {
 .word .w { font-size: 13px; font-weight: 600; margin-top: 2px; }
 
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(100px + env(safe-area-inset-bottom));
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + var(--rodape));
   background: var(--ink); color: var(--bg); padding: 12px 18px; border-radius: 100px;
   font-size: 13px; font-weight: 500; z-index: 200; box-shadow: var(--sh-md); max-width: 90vw; text-align: center;
 }
