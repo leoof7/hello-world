@@ -181,7 +181,10 @@ for (const tema of ['dark', 'light']) {
     valor: document.querySelector('.sheet [name="valor"]').value,
     data: document.querySelector('.sheet [name="date"]').value,
   }));
-  ok('a frase vira valor e data', lido.valor === '85,00' && lido.data === '2026-08-19',
+  // "ontem" é relativo ao dia em que o teste roda: cravar a data aqui fazia o
+  // teste quebrar sozinho na virada do dia, sem ninguém ter mexido no código.
+  const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  ok('a frase vira valor e data', lido.valor === '85,00' && lido.data === ontem,
     `${lido.valor} · ${lido.data}`);
   await page.click('.sheet [data-x]');
   await page.waitForTimeout(200);

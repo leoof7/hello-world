@@ -402,9 +402,44 @@ body {
 .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .cal-sem { font-size: 9px; font-weight: 600; color: var(--muted); text-align: center; padding-bottom: 4px; }
 .cal-dia {
-  aspect-ratio: 1; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 1; border-radius: 8px; display: flex; flex-direction: column; gap: 2px;
+  align-items: center; justify-content: center;
   font-size: 10.5px; color: var(--ink-2); background: var(--surface-2);
 }
+/* A data como coluna, não enterrada no meio do texto: numa lista é ela que
+   o olho usa para se localizar. */
+.dia {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 34px; flex-shrink: 0; line-height: 1;
+}
+.dia-n { font-size: 15px; font-weight: 600; color: var(--ink); letter-spacing: -.02em; }
+.dia-m { font-size: 8.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.dia.hoje .dia-n { color: var(--jade); }
+.dia.hoje .dia-m { color: var(--jade); }
+
+.row .s .tagzinha {
+  display: inline-block; padding: 2px 7px; border-radius: 100px; margin-right: 4px;
+  background: var(--chip); color: var(--muted); font-size: 9.5px; font-weight: 500;
+}
+
+.chart-eixo {
+  display: flex; justify-content: space-between; margin-top: 5px;
+  font-size: 9.5px; color: var(--faint); letter-spacing: .02em;
+}
+.cal-pts { display: flex; gap: 2px; }
+.cal-pts i { width: 4px; height: 4px; border-radius: 50%; display: block; }
+
+/* Recolhido por padrão: o calendário é consulta, não o primeiro olhar. */
+.dobra > summary {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  cursor: pointer; list-style: none; padding: 14px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--line);
+  font-size: 15.5px; font-weight: 600; letter-spacing: -.02em;
+}
+.dobra > summary::-webkit-details-marker { display: none; }
+.dobra > summary::after { content: "⌄"; color: var(--muted); font-size: 15px; }
+.dobra[open] > summary::after { content: "⌃"; }
+.dobra-nota { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: auto; margin-right: 6px; }
 .cal-dia.in-1 { background: var(--jade-soft); }
 .cal-dia.in-2 { background: var(--jade); color: var(--on-jade); opacity: .8; }
 .cal-dia.in-3 { background: var(--jade); color: var(--on-jade); }

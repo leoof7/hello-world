@@ -453,15 +453,28 @@ function linha(t, v, { acao = 'editar' } = {}) {
   const positivo = t.amountCents > 0;
   const classe = positivo ? 'j' : t.installment ? 'a' : '';
   const ic = positivo ? 'dinheiro' : t.installment ? 'lista' : t.method === 'pix' ? 'pix' : t.cardId ? 'cartao' : 'banco';
-  const legenda = [
-    t.installment ? `Parcela ${t.installment.n}/${t.installment.of}` : cat?.name || 'sem categoria',
-    formatShort(t.date),
-  ].join(' · ');
+
+  // A data sai da linha de texto e vira coluna própria: dia grande, mês
+  // pequeno. Numa lista, a data é a coisa que o olho usa para se localizar —
+  // enterrada no meio de "categoria · data" ela some.
+  const { d, m: mes } = parts(t.date);
+  const hoje = t.date === v.todayISO;
+
+  const etiquetas = [
+    t.installment ? `Parcela ${t.installment.n}/${t.installment.of}` : null,
+    cat?.name || 'sem categoria',
+    t.categoriaAnterior ? `era ${t.categoriaAnterior}` : null,
+  ].filter(Boolean);
+
   return `<button class="row" data-act="${acao}" data-id="${esc(t.id)}">
+    <div class="dia ${hoje ? 'hoje' : ''}">
+      <span class="dia-n">${d}</span>
+      <span class="dia-m">${esc(monthAbbr(t.date.slice(0, 7)).toLowerCase())}</span>
+    </div>
     <div class="ic ${classe}">${icon(ic)}</div>
     <div class="bd">
       <div class="t">${esc(t.description || 'Lançamento')}</div>
-      <div class="s">${esc(legenda)}</div>
+      <div class="s">${etiquetas.map((e) => `<span class="tagzinha">${esc(e)}</span>`).join('')}</div>
     </div>
     <div class="rt">
       <div class="amt num ${positivo ? 'pos' : ''}">${m(t.amountCents, (c) => formatCents(c, { sign: true }))}</div>
@@ -627,6 +640,47 @@ function historicoBarras(meses) {
     <span style="font-size:10.5px;color:var(--muted)">média ${m(media, brlShort)}/mês</span></div>`;
 }
 
+/**
+ * "Esse mês fecha?" — a pergunta do dia 1, que a projeção de 90 dias não
+ * responde. Cada saída aparece nomeada: número solto não deixa ninguém agir,
+ * mas "faturas R$ 1.350" diz onde mexer.
+ */
+function fechamentoMes(v) {
+  const f = v.fechamento;
+  if (!f.entradasCents && !f.totalSaidasCents) return '';
+
+  const pct = Math.min(100, Math.round(f.comprometidoRatio * 100));
+  const cor = f.comprometidoRatio > 1 ? 'var(--red)' : f.comprometidoRatio > 0.85 ? 'var(--amber)' : 'var(--jade)';
+
+  return `
+  <div class="sec" style="margin-top:0">
+    <div class="sh"><h3>O mês fecha?</h3>
+      <a class="${f.fecha ? '' : 'warn'}">${f.fecha ? `sobram ${m(f.sobraCents, brlShort)}` : `faltam ${m(Math.abs(f.sobraCents), brlShort)}`}</a></div>
+    <div class="panel">
+      <div class="ft" style="margin:0 0 10px">
+        <span style="font-size:12.5px">Entra ${m(f.entradasCents)}</span>
+        <span style="font-size:12.5px;color:var(--muted)">Sai ${m(f.totalSaidasCents)}</span>
+      </div>
+      <div class="bar"><i style="width:${pct}%;background:${cor}"></i></div>
+      <div class="ft" style="margin:6px 0 12px">
+        <span style="font-size:10.5px;color:var(--muted)">${pct}% da entrada já comprometido</span>
+      </div>
+      ${f.saidas.map((s) => `
+        <div class="ft" style="margin:0 0 7px">
+          <span style="font-size:11.5px;color:var(--muted)">${esc(s.rotulo)}</span>
+          <span class="num" style="font-size:12.5px">${m(s.cents)}</span>
+        </div>`).join('')}
+      <div class="ft" style="margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line-2)">
+        <span style="font-size:11.5px">${f.fecha ? 'Livre para guardar' : 'Falta'}</span>
+        <span class="num" style="font-size:15px;color:${f.fecha ? 'var(--jade)' : 'var(--red)'}">${m(Math.abs(f.sobraCents))}</span>
+      </div>
+      <p style="font-size:11px;color:var(--muted);line-height:1.6;margin-top:10px">
+        O que vai para investimento ou cofrinho não entra como saída — guardar não é gastar.
+      </p>
+    </div>
+  </div>`;
+}
+
 const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
 /** Grade do mês: verde quem entrou mais que saiu, vermelho o contrário — cor
@@ -637,10 +691,44 @@ function calendarioMes(v) {
     const r = Math.abs(cents) / maxAbs;
     return r > 0.66 ? 3 : r > 0.33 ? 2 : 1;
   };
+
+  // O que VENCE em cada dia, com a cor do cartão. O calendário mostrava só o
+  // passado; o mês tem compromisso marcado, e ver "dia 27 vence o Nubank"
+  // antes do dia 27 é o que evita o rotativo.
+  const marcasPorDia = new Map();
+  const marcar = (dia, cor, texto) => {
+    if (!dia) return;
+    const lista = marcasPorDia.get(dia) || [];
+    if (!lista.some((x) => x.texto === texto)) lista.push({ cor, texto });
+    marcasPorDia.set(dia, lista);
+  };
+
+  for (const c of v.cartoes) {
+    marcar(c.dueDay, c.color || 'blue', `vence ${c.name}`);
+    marcar(c.closingDay, 'steel', `fecha ${c.name}`);
+  }
+  for (const r of v.doc.recurring || []) {
+    if (r.kind === 'income') marcar(r.dayOfMonth, 'jade', `entra ${r.label}`);
+  }
+  for (const d of v.dividas) {
+    if (d.dueDay) marcar(d.dueDay, 'red', `mínimo ${d.name}`);
+  }
+
   const vazias = Array.from({ length: v.primeiroDiaSemana }, () => '<div></div>').join('');
   const celulas = v.calendarioDias.map((d) => {
     const classe = d.cents > 0 ? `in-${nivel(d.cents)}` : d.cents < 0 ? `out-${nivel(d.cents)}` : '';
-    return `<div class="cal-dia ${classe}" title="dia ${d.day} · ${d.cents === 0 ? 'sem lançamento' : brl(d.cents)}">${d.day}</div>`;
+    const marcas = marcasPorDia.get(d.day) || [];
+    const titulo = [
+      `dia ${d.day}`,
+      d.cents === 0 ? 'sem lançamento' : brl(d.cents),
+      ...marcas.map((mk) => mk.texto),
+    ].join(' · ');
+
+    return `<div class="cal-dia ${classe}" title="${esc(titulo)}">
+      <span>${d.day}</span>
+      ${marcas.length ? `<span class="cal-pts">${marcas.slice(0, 3).map((mk) =>
+        `<i style="background:var(--${esc(mk.cor)})"></i>`).join('')}</span>` : ''}
+    </div>`;
   }).join('');
 
   return `<div class="cal">
@@ -650,6 +738,7 @@ function calendarioMes(v) {
   <div class="legend" style="margin-top:10px">
     <span><i style="background:var(--jade)"></i>entrou mais</span>
     <span><i style="background:var(--red)"></i>saiu mais</span>
+    ${v.cartoes.length ? '<span><i style="background:var(--blue)"></i>vencimento de cartão</span>' : ''}
   </div>`;
 }
 
@@ -865,27 +954,22 @@ function analise(app) {
     <span class="arr">${icon('seta')}</span>
   </button>`}
 
-  <div class="wrow">
-    ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), origemCusto)}
-    ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, `alvo ${s.emergency.targetMonths} meses`)}
+  ${fechamentoMes(v)}
+
+  <div class="bloco-titulo">Histórico</div>
+
+  <div class="sec" style="margin-top:0">
+    <div class="sh"><h3>Tendência mensal</h3><a>toque num mês pra abrir</a></div>
+    <div class="panel">${historicoBarras(v.historicoMensal)}</div>
   </div>
 
-  <div class="sec" style="margin-top:10px">
-    <div class="panel" style="padding:14px">
-      <div class="ft" style="margin:0 0 6px">
-        <span style="font-size:11px;color:var(--muted)">Custo mínimo</span>
-        <span style="font-size:11px;color:var(--muted)">${esc(origemCusto)}</span>
-      </div>
-      <div class="ft" style="margin:0">
-        <span style="font-size:11px;color:var(--muted)">Reserva</span>
-        <span style="font-size:11px;color:var(--muted)">${esc(origemReserva)}</span>
-      </div>
-      ${s.emergency.missingCents > 0 ? `<div class="ft" style="margin:8px 0 0;padding-top:8px;border-top:1px solid var(--line-2)">
-        <span style="font-size:11px;color:var(--muted)">Falta para ${s.emergency.targetMonths} meses</span>
-        <span class="num" style="font-size:12px">${m(s.emergency.missingCents, brlShort)}</span>
-      </div>` : ''}
-    </div>
-  </div>
+  <details class="sec dobra">
+    <summary>
+      <span>Calendário do mês</span>
+      ${v.piorDiaMes ? `<span class="dobra-nota">pior dia ${v.piorDiaMes.day} · ${m(Math.abs(v.piorDiaMes.cents), brlShort)}</span>` : ''}
+    </summary>
+    <div class="panel" style="margin-top:10px">${calendarioMes(v)}</div>
+  </details>
 
   <div class="bloco-titulo">Próximos 90 dias</div>
 
@@ -895,17 +979,9 @@ function analise(app) {
     <div class="panel">${curvaCaixa(v.projecao)}</div>
   </div>
 
-  <div class="bloco-titulo">Histórico</div>
-
-  <div class="sec" style="margin-top:0">
-    <div class="sh"><h3>Calendário do mês</h3>
-      ${v.piorDiaMes ? `<a class="warn">pior dia ${v.piorDiaMes.day} · ${m(Math.abs(v.piorDiaMes.cents), brlShort)}</a>` : ''}</div>
-    <div class="panel">${calendarioMes(v)}</div>
-  </div>
-
-  <div class="sec">
-    <div class="sh"><h3>Tendência mensal</h3><a>gasto total por mês</a></div>
-    <div class="panel">${historicoBarras(v.historicoMensal)}</div>
+  <div class="wrow">
+    ${kpi('Custo mínimo', m(s.minimumCost.cents, brlShort), origemCusto)}
+    ${kpi('Reserva', `${s.emergency.months.toFixed(1)} m`, esc(origemReserva))}
   </div>
 
   <div class="bloco-titulo">Este mês</div>
@@ -1071,15 +1147,38 @@ function curvaCaixa(proj) {
   const zero = y(0);
   const negativo = !!proj.firstNegative;
 
+  // Uma linha sem referência não diz nada. O que falta para ela virar leitura:
+  // a área preenchida (dá volume ao "quanto"), a linha do zero destacada (a
+  // fronteira que importa), o ponto do pior dia marcado (para onde olhar) e as
+  // datas embaixo (quando é isso). Sem esses quatro, é rabisco bonito.
+  const areaBaixo = `0,${zero.toFixed(1)} ${d.join(' ')} ${w},${zero.toFixed(1)}`;
+  const iMenor = pontos.indexOf(Math.min(...pontos));
+  const xMenor = ((iMenor / Math.max(1, pontos.length - 1)) * w).toFixed(1);
+  const yMenor = y(pontos[iMenor]).toFixed(1);
+  const meio = proj.days[Math.floor(proj.days.length / 2)];
+  const fim = proj.days[proj.days.length - 1];
+
   return `<div class="chart">
-    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:100px">
-      <line x1="0" y1="${zero.toFixed(1)}" x2="${w}" y2="${zero.toFixed(1)}" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"/>
-      <polyline points="${d.join(' ')}" fill="none" stroke="var(--${negativo ? 'red' : 'jade'})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:110px">
+      <polyline points="${areaBaixo}" fill="var(--${negativo ? 'red' : 'jade'})" opacity=".14" stroke="none"/>
+      <line x1="0" y1="${zero.toFixed(1)}" x2="${w}" y2="${zero.toFixed(1)}"
+        stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
+      <polyline points="${d.join(' ')}" fill="none" stroke="var(--${negativo ? 'red' : 'jade'})"
+        stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${xMenor}" cy="${yMenor}" r="4" fill="var(--${negativo ? 'red' : 'jade'})"
+        stroke="var(--surface)" stroke-width="2"/>
     </svg>
   </div>
-  <div class="ft" style="margin-top:6px">
-    <span style="font-size:10.5px;color:var(--muted)">hoje ${m(proj.days[0].balanceCents, brlShort)}</span>
-    <span style="font-size:10.5px;color:var(--muted)">menor ${m(proj.min.cents, brlShort)} em ${formatShort(proj.min.date)}</span>
+  <div class="chart-eixo">
+    <span>hoje</span><span>${esc(formatShort(meio.date))}</span><span>${esc(formatShort(fim.date))}</span>
+  </div>
+  <div class="ft" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line-2)">
+    <span style="font-size:11px;color:var(--muted)">Hoje</span>
+    <span class="num" style="font-size:12.5px">${m(proj.days[0].balanceCents)}</span>
+  </div>
+  <div class="ft">
+    <span style="font-size:11px;color:var(--muted)">Pior dia · ${esc(formatShort(proj.min.date))}</span>
+    <span class="num" style="font-size:12.5px;color:${proj.min.cents < 0 ? 'var(--red)' : 'var(--ink)'}">${m(proj.min.cents)}</span>
   </div>
   ${negativo ? `<div class="nudge crit" style="margin-top:10px">
     <span class="ic">${icon('alerta')}</span>

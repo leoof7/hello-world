@@ -184,3 +184,47 @@ test('nunca passa do limite de avisos — notificação demais é notificação 
 test('app em dia não inventa aviso', () => {
   assert.deepEqual(avisosDoDia({ projecao: {}, todayISO: HOJE }), []);
 });
+
+// ------------------------------------------------------- o mês fecha ou não
+
+test('o fechamento soma as saídas e diz quanto sobra', async () => {
+  const { fechamentoDoMes } = await import('../src/core/insights.js');
+  const f = fechamentoDoMes({
+    entradasCents: 470000, faturasCents: 135000, fixosCents: 117000,
+    parcelasCents: 120000, minimosDividaCents: 100000,
+  });
+  assert.equal(f.totalSaidasCents, 472000);
+  assert.equal(f.sobraCents, -2000, 'falta R$ 20 para fechar');
+  assert.equal(f.fecha, false);
+  assert.equal(f.saidas.length, 4);
+});
+
+test('guardar não é gastar — investimento não entra como saída', async () => {
+  const { fechamentoDoMes } = await import('../src/core/insights.js');
+  const f = fechamentoDoMes({ entradasCents: 470000, fixosCents: 117000 });
+  assert.equal(f.sobraCents, 353000, 'o que sobra é para guardar, não já guardado');
+  assert.ok(f.saidas.every((s) => !/investi|cofrinho/i.test(s.rotulo)));
+});
+
+test('saída zerada não polui a lista', async () => {
+  const { fechamentoDoMes } = await import('../src/core/insights.js');
+  const f = fechamentoDoMes({ entradasCents: 100000, fixosCents: 50000 });
+  assert.equal(f.saidas.length, 1, 'só os que têm valor aparecem');
+});
+
+test('comprometido acima de 100% é mês que não fecha sozinho', async () => {
+  const { fechamentoDoMes } = await import('../src/core/insights.js');
+  const f = fechamentoDoMes({ entradasCents: 100000, fixosCents: 150000 });
+  assert.ok(f.comprometidoRatio > 1);
+  assert.equal(f.fecha, false);
+});
+
+test('categoria sem gasto no mês não vira insight', () => {
+  const tx = [
+    gasto('2026-06', '10', 'delivery', 30000),
+    gasto('2026-07', '10', 'delivery', 30000),
+    // nada em agosto — "100% abaixo" não é notícia, é o que não aconteceu
+  ];
+  const r = versusMedia(tx, categorias, HOJE);
+  assert.ok(!r.some((x) => x.categoryId === 'delivery'), 'zero gasto não entra na lista');
+});

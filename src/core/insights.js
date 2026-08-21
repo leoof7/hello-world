@@ -57,6 +57,11 @@ export function versusMedia(transactions, categories, todayISO, { months = 3, di
     const esperado = Math.round((media * dia) / 30);
     if (esperado <= 0) continue;
 
+    // "Você gastou R$ 0 em Presentes, 100% abaixo do seu ritmo" não é notícia:
+    // é a lista contando o que NÃO aconteceu. Categoria sem gasto no mês sai
+    // fora — o insight que interessa é sobre onde o dinheiro está indo.
+    if (gastoAtual <= 0) continue;
+
     const variacao = (gastoAtual - esperado) / esperado;
     if (Math.abs(variacao) < 0.25) continue; // ruído não é notícia
 
@@ -136,6 +141,45 @@ export function podeComprar({
     comprometeReserva: reservaCents > 0 && valorCents > reservaCents,
     motivos,
     todayISO,
+  };
+}
+
+/**
+ * O fechamento do mês: tudo que entra menos tudo que sai, item por item.
+ *
+ * Investimento e cofrinho NÃO entram como saída. Guardar não é gastar — é o
+ * mesmo dinheiro mudando de lugar, e contar como saída faria o mês parecer
+ * apertado justamente para quem está conseguindo poupar.
+ *
+ * A projeção de 90 dias responde "quando fico negativo". Esta responde outra
+ * pergunta, que é a que a pessoa faz no dia 1: "esse mês fecha?".
+ */
+export function fechamentoDoMes({
+  entradasCents = 0,
+  faturasCents = 0,
+  parcelasCents = 0,
+  fixosCents = 0,
+  minimosDividaCents = 0,
+} = {}) {
+  const saidas = [
+    { id: 'faturas', rotulo: 'Faturas do cartão', cents: faturasCents },
+    { id: 'fixos', rotulo: 'Gastos fixos', cents: fixosCents },
+    { id: 'parcelas', rotulo: 'Parcelas', cents: parcelasCents },
+    { id: 'dividas', rotulo: 'Mínimos de dívida', cents: minimosDividaCents },
+  ].filter((s) => s.cents > 0);
+
+  const totalSaidas = sum(saidas.map((s) => s.cents));
+  const sobra = entradasCents - totalSaidas;
+
+  return {
+    entradasCents,
+    saidas,
+    totalSaidasCents: totalSaidas,
+    sobraCents: sobra,
+    fecha: sobra >= 0,
+    // Quanto de cada real que entra já está comprometido antes de você decidir
+    // qualquer coisa. Acima de 100% o mês não fecha sozinho.
+    comprometidoRatio: entradasCents > 0 ? totalSaidas / entradasCents : 0,
   };
 }
 

@@ -14,7 +14,7 @@ import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js'
 import { scan } from '../core/leaks.js';
 import { diagnose } from '../core/health.js';
 import { monthlySpend, dailyNet, worstDay, NEUTRAS } from '../core/history.js';
-import { versusMedia, avisosDoDia, marcos } from '../core/insights.js';
+import { versusMedia, avisosDoDia, marcos, fechamentoDoMes } from '../core/insights.js';
 import { perfilAtual } from '../core/perfil.js';
 import { categorizeAll } from '../core/categorize.js';
 import { MERCHANTS } from '../seed/categories.js';
@@ -229,9 +229,30 @@ export function derive(doc, todayISO = today()) {
     vazamentos,
     saude,
     revisao,
-    lancamentos: [...doc.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 12),
+    // "Últimos lançamentos" é o que JÁ aconteceu, do mais recente para trás.
+    // Parcela que só vence em dezembro aparecia no topo empurrando o gasto de
+    // hoje para baixo — ela é compromisso futuro e o lugar dela é o muro de
+    // parcelas, não a lista do que você acabou de fazer.
+    lancamentos: [...doc.transactions]
+      .filter((t) => t.date <= todayISO)
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .slice(0, 12),
     guia: guiaStatus(doc),
     comparativo,
+    // "Esse mês fecha?" — pergunta diferente da projeção de 90 dias, que
+    // responde "quando fico negativo". As faturas do mês corrente e os fixos
+    // contra o que entra.
+    fechamento: fechamentoDoMes({
+      entradasCents: rendaFixaCents + extrasMesCents,
+      faturasCents: sum(
+        faturas.futuras
+          .filter((s) => monthKey(s.dueDate) === mes && !pagas.has(`${s.cardId}|${s.cycleId}`))
+          .map((s) => s.totalCents)
+      ),
+      parcelasCents: parcelasDoMesCents,
+      fixosCents,
+      minimosDividaCents: minimosCents,
+    }),
     // O perfil é a fase que a pessoa está vivendo, lida do comportamento.
     // O quiz do começo só cobre o vazio, e perde a vez assim que há dado.
     perfil: perfilAtual({
@@ -285,11 +306,21 @@ function custoDeVida(doc, mesAtual, fixosCents) {
   }
 
   const valores = [...porMes.values()];
-  if (valores.length < 2) {
+  const media = valores.length ? Math.round(sum(valores) / valores.length) : 0;
+
+  // O que já se sabe que sai todo mês é piso, igual no custo mínimo.
+  //
+  // Isto aqui é mais perigoso que lá: esta função decide quanto "sobra" para
+  // atacar dívida. Com dois meses magros de histórico o app dizia que sobravam
+  // R$ 4.446 de uma renda de R$ 4.700 — porque achava que viver custava R$ 254.
+  // Mandar alguém comprometer isso com dívida é empurrar para o vermelho no
+  // mês seguinte.
+  if (media < fixosCents) {
     return { cents: fixosCents, source: 'fixos', months: valores.length, confident: false };
   }
+
   return {
-    cents: Math.round(sum(valores) / valores.length),
+    cents: media,
     source: 'histórico',
     months: valores.length,
     confident: valores.length >= 3,
