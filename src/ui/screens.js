@@ -197,10 +197,32 @@ function header(app, { voltar } = {}) {
     <div class="acts">
       <button class="ib" data-act="tema" title="Tema" aria-label="Trocar tema">${icon('lua')}</button>
       <button class="ib" data-act="privacidade" title="Esconder valores" aria-label="Esconder valores">${icon('escudo')}</button>
-      <button class="ib" data-go="revisao" title="Revisão" aria-label="Revisão">
-        ${icon('sino')}${app.view.revisao.length ? '<span class="dot"></span>' : ''}
+      <button class="ib ${app.view.avisos.length ? 'tem-aviso' : ''}" data-act="central-avisos"
+        title="Avisos" aria-label="Avisos${app.view.avisos.length ? ` · ${app.view.avisos.length}` : ''}">
+        ${icon('sino')}${app.view.avisos.length
+          ? `<span class="badge">${app.view.avisos.length}</span>`
+          : app.view.revisao.length ? '<span class="dot"></span>' : ''}
       </button>
     </div>
+  </div>`;
+}
+
+/**
+ * Um aviso, com o xis que tira ele da tela.
+ *
+ * Dispensar não apaga: o aviso continua existindo e vai para a campainha. A
+ * diferença importa — quem some com um aviso de conta ficando negativa não
+ * quer que o problema suma, quer que a tela pare de gritar enquanto ele
+ * resolve. Apagar de verdade seria o app esconder dinheiro de alguém.
+ */
+function avisoCard(a) {
+  return `<div class="nudge ${a.urgencia >= 90 ? 'crit' : ''}" style="width:100%;margin-bottom:8px">
+    <span class="ic">${icon(a.urgencia >= 90 ? 'alerta' : 'sino')}</span>
+    <button class="nudge-corpo" data-go="${esc(a.tela)}">
+      <b>${esc(a.titulo)}</b><i>${esc(a.texto)}</i>
+    </button>
+    <button class="nudge-x" data-act="dispensar-aviso" data-id="${esc(a.id)}"
+      aria-label="Tirar da tela">${icon('x')}</button>
   </div>`;
 }
 
@@ -256,13 +278,8 @@ function painel(app) {
   ${guia}
   ${backup}
 
-  ${v.avisos.length ? `<div class="sec" style="margin-top:16px">
-    ${v.avisos.map((a) => `
-      <button class="nudge ${a.urgencia >= 90 ? 'crit' : ''}" data-go="${esc(a.tela)}" style="width:100%;margin-bottom:8px">
-        <span class="ic">${icon(a.urgencia >= 90 ? 'alerta' : 'sino')}</span>
-        <div><b>${esc(a.titulo)}</b><i>${esc(a.texto)}</i></div>
-        <span class="arr">${icon('seta')}</span>
-      </button>`).join('')}
+  ${v.avisosNaTela.length ? `<div class="sec" style="margin-top:16px">
+    ${v.avisosNaTela.map(avisoCard).join('')}
   </div>` : ''}
 
   <button class="ze-barra" data-act="falar">

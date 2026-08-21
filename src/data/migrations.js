@@ -34,6 +34,7 @@ export function emptyDocument() {
     assets: [],        // bens: carro, moto, casa — valor estimado, entram no patrimônio
     faturasPagas: [],  // "cardId|cycleId" das faturas que a pessoa confirmou ter pago
     snapshots: [],     // patrimônio mês a mês, digitado à mão
+    avisosDispensados: [], // ids de avisos que saíram da tela e vivem na campainha
     settings: {
       theme: 'auto',
       debtMethod: 'avalanche',

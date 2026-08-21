@@ -75,9 +75,15 @@ export function derive(doc, todayISO = today()) {
   // Fatura marcada como paga já saiu do bolso — não é mais saída futura,
   // senão a projeção mostraria um dinheiro que já foi embora como se ainda
   // fosse sair de novo.
+  // Fixo pago no vale sai do saldo do benefício, não da conta. Marcar aqui
+  // deixa a projeção pular esses sem precisar conhecer cartão nenhum.
+  const beneficios = new Set((doc.cards || []).filter(ehBeneficio).map((c) => c.id));
+  const recorrentes = (doc.recurring || []).map((r) =>
+    (r.cardId && beneficios.has(r.cardId) ? { ...r, foraDoCaixa: true } : r));
+
   const eventos = buildEvents(
     {
-      recurring: doc.recurring || [],
+      recurring: recorrentes,
       statements: faturas.futuras.filter((s) => !pagas.has(`${s.cardId}|${s.cycleId}`)),
       // Débito agendado para depois de hoje ainda vai sair da conta — o saldo
       // digitado não o contém. Vale nenhum entra aqui: ele não passa na conta.
@@ -174,6 +180,7 @@ export function derive(doc, todayISO = today()) {
 
   // ---- vazamentos e diagnóstico ----
   const vazamentos = scan(doc.transactions, todayISO);
+  const dispensados = new Set(doc.avisosDispensados || []);
   const saude = diagnose({
     transactions: doc.transactions,
     categories: categorias,
@@ -199,6 +206,15 @@ export function derive(doc, todayISO = today()) {
   });
   // A fila mostra primeiro o que o app não soube resolver sozinho.
   const revisao = [...toReview, ...sugeridas.filter((t) => t.categoryId)].slice(0, 40);
+
+  const todosAvisos = avisosDoDia({
+    projecao,
+    faturas: faturas.futuras.filter((s) => !pagas.has(`${s.cardId}|${s.cycleId}`)),
+    vazamentos,
+    revisaoCount: revisao.length,
+    backupDiasSem: null,
+    todayISO,
+  });
 
   // ---- progresso da saída ----
   const picoCents = Math.max(doc.profile?.debtPeakCents || 0, dividaTotalCents);
@@ -308,14 +324,14 @@ export function derive(doc, todayISO = today()) {
     }),
     // Os avisos precisam da projeção e das faturas já prontas, por isso saem
     // daqui de baixo e não lá de cima.
-    avisos: avisosDoDia({
-      projecao,
-      faturas: faturas.futuras.filter((s) => !pagas.has(`${s.cardId}|${s.cycleId}`)),
-      vazamentos,
-      revisaoCount: revisao.length,
-      backupDiasSem: null,
-      todayISO,
-    }),
+    //
+    // `avisos` é tudo que está valendo hoje — é o que a campainha conta.
+    // `avisosNaTela` tira os que a pessoa dispensou. Dispensar não apaga:
+    // quem some com um aviso de conta ficando negativa não quer que o
+    // problema suma, quer que a tela pare de gritar enquanto ele resolve.
+    avisos: todosAvisos,
+    avisosNaTela: todosAvisos.filter((a) => !dispensados.has(a.id)),
+    avisosDispensados: todosAvisos.filter((a) => dispensados.has(a.id)),
     marcos: marcos({
       dividaTotalCents,
       dividaPicoCents: picoCents,

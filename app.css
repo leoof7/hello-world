@@ -587,3 +587,97 @@ body {
 @media (min-width: 640px) {
   .screen { padding-left: max(18px, calc(50vw - 260px)); padding-right: max(18px, calc(50vw - 260px)); }
 }
+
+/* ---------- cadastro por conversa ---------- */
+/* Uma pergunta por tela. O espaço vazio é o ponto: quinze campos de uma vez é
+   onde a pessoa desiste, e não porque digitar seja difícil. */
+.papo {
+  flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 420px;
+  margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 20px calc(20px + var(--rodape));
+  gap: 18px; text-align: left;
+}
+.papo-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.papo-passo {
+  font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); background: var(--chip); padding: 5px 10px; border-radius: 100px;
+}
+.papo-corpo { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+.papo-fala {
+  font-family: 'Newsreader', Georgia, serif; font-weight: 300;
+  font-size: clamp(24px, 7vw, 30px); line-height: 1.25; letter-spacing: -.01em; color: var(--ink);
+  text-wrap: pretty;
+}
+.papo-ajuda { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.papo-aviso { font-size: 13px; color: var(--amber); line-height: 1.6; font-weight: 500; }
+
+.papo-baixo { display: flex; flex-direction: column; gap: 10px; }
+.papo-campo { display: flex; gap: 10px; align-items: center; }
+.papo-campo input {
+  flex: 1; min-height: 54px; font-size: 17px; padding: 0 16px; border-radius: 14px;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit;
+}
+.papo-campo input:focus { border-color: var(--jade); outline: none; }
+.papo-mic {
+  width: 54px; height: 54px; border-radius: 50%; border: 0; flex-shrink: 0; cursor: pointer;
+  background: var(--jade); color: var(--on-jade); display: flex; align-items: center; justify-content: center;
+}
+.papo-mic svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.papo-mic.ouvindo { animation: pulsa 1.1s ease-in-out infinite; }
+@keyframes pulsa { 50% { transform: scale(1.08); box-shadow: 0 0 0 10px var(--jade-soft); } }
+
+.papo-saidas { display: flex; justify-content: space-between; gap: 12px; }
+.papo-link {
+  background: none; border: 0; font-family: inherit; font-size: 12.5px; color: var(--muted);
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 6px 0;
+}
+
+/* O que o app entendeu, editável antes de virar dado guardado. */
+.papo-eco {
+  background: var(--jade-soft); border: 1px solid var(--jade); border-radius: 16px; padding: 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.papo-eco-rot { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--jade); }
+.papo-eco-valor {
+  width: 100%; min-height: 48px; font-size: 20px; font-weight: 600; padding: 0 12px;
+  border-radius: 11px; border: 1.5px solid var(--line); background: var(--surface);
+  color: var(--ink); font-family: inherit;
+}
+.papo-eco-vazio { font-size: 14px; color: var(--ink-2); }
+.papo-lista { display: flex; flex-direction: column; gap: 7px; }
+.papo-item { display: flex; gap: 7px; align-items: center; }
+.papo-item-nome, .papo-item-valor {
+  min-height: 44px; font-size: 15px; padding: 0 11px; border-radius: 11px;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font-family: inherit; min-width: 0;
+}
+.papo-item-nome { flex: 1.6; }
+.papo-item-valor { flex: 1; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+.papo-item-x {
+  width: 38px; height: 38px; flex-shrink: 0; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--surface-2); color: var(--muted); display: flex; align-items: center; justify-content: center;
+}
+.papo-item-x svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; }
+
+/* ---------- aviso que sai da tela ---------- */
+/* O xis tira da tela; o aviso continua na campainha. Some do caminho sem
+   sumir do problema. */
+.nudge-corpo {
+  flex: 1; min-width: 0; text-align: left; background: none; border: 0;
+  font: inherit; color: inherit; cursor: pointer; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.nudge-x {
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; border: 0; cursor: pointer;
+  background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center;
+  align-self: flex-start;
+}
+.nudge-x:active { background: var(--chip); }
+.nudge-x svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; }
+
+/* A campainha muda de cor quando há aviso — e diz quantos. */
+.ib.tem-aviso { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); }
+.ib .badge {
+  position: absolute; top: -3px; right: -3px; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 100px; background: var(--red); color: #fff; border: 2px solid var(--bg);
+  font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  font-family: 'IBM Plex Mono', monospace;
+}

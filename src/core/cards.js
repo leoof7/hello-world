@@ -99,7 +99,7 @@ export function validarCartao(card, { accounts = [] } = {}) {
  * dos tempos. Sem esse corte, atualizar o saldo à mão descontaria de novo as
  * compras já refletidas nele, e o vale iria a zero sozinho a cada correção.
  */
-export function saldoDoBeneficio(card, transactions = [], todayISO) {
+export function saldoDoBeneficio(card, transactions = [], todayISO, recurring = []) {
   const desde = card.balanceAsOf || null;
   const gastos = transactions.filter((t) =>
     t.cardId === card.id
@@ -108,9 +108,20 @@ export function saldoDoBeneficio(card, transactions = [], todayISO) {
     && (!todayISO || t.date <= todayISO));
 
   const gastoCents = gastos.reduce((total, t) => total + Math.abs(t.amountCents), 0);
+
+  // Conta fixa paga no vale também consome o saldo. Sem isto o dinheiro sumia
+  // de um lado sem sair do outro: a projeção da conta corrente parava de
+  // descontar a luz, e o saldo do vale continuava cheio como se ela não
+  // existisse — o app perdia R$ 300 por mês de vista.
+  const fixosCents = (recurring || [])
+    .filter((r) => r.cardId === card.id && r.kind === 'expense')
+    .reduce((total, r) => total + Math.abs(r.amountCents) * (r.every === 'quinzena' ? 2 : 1), 0);
+
   return {
-    saldoCents: (card.balanceCents || 0) - gastoCents,
-    gastoCents,
+    saldoCents: (card.balanceCents || 0) - gastoCents - fixosCents,
+    gastoCents: gastoCents + fixosCents,
+    gastoAvulsoCents: gastoCents,
+    fixosCents,
     desde,
   };
 }
@@ -134,8 +145,8 @@ export function proximaRecarga(card, todayISO) {
  * O ritmo vem do que já foi gasto no ciclo corrente, não de uma média de meses
  * — vale é dinheiro de mês fechado, e o mês passado não paga o almoço de hoje.
  */
-export function previsaoDoBeneficio(card, transactions = [], todayISO) {
-  const { saldoCents, gastoCents } = saldoDoBeneficio(card, transactions, todayISO);
+export function previsaoDoBeneficio(card, transactions = [], todayISO, recurring = []) {
+  const { saldoCents, gastoCents } = saldoDoBeneficio(card, transactions, todayISO, recurring);
   const recarga = proximaRecarga(card, todayISO);
 
   const base = {
@@ -182,7 +193,7 @@ function recargaAnterior(card, todayISO) {
 export function valesDe(doc, todayISO) {
   return (doc.cards || [])
     .filter(ehBeneficio)
-    .map((c) => ({ ...previsaoDoBeneficio(c, doc.transactions || [], todayISO), color: c.color }))
+    .map((c) => ({ ...previsaoDoBeneficio(c, doc.transactions || [], todayISO, doc.recurring || []), color: c.color }))
     .sort((a, b) => {
       const pa = a.diasQueAinda ?? 9999;
       const pb = b.diasQueAinda ?? 9999;

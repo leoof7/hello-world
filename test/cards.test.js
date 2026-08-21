@@ -272,3 +272,63 @@ test('compra no vale continua contando na categoria dela', async () => {
   assert.equal(v.saude.allocation.essentialCents, 12000,
     'o cartão é a origem do dinheiro, não a categoria da compra');
 });
+
+// ------------------------------- conta fixa paga no vale (água, luz, internet)
+
+test('gasto fixo pago no vale não sai da conta corrente', async () => {
+  const { derive } = await import('../src/ui/state.js');
+  const { emptyDocument } = await import('../src/data/migrations.js');
+  const { CATEGORIES } = await import('../src/seed/categories.js');
+
+  const base = {
+    ...emptyDocument(),
+    categories: CATEGORIES.map((c) => ({ ...c })),
+    accounts: [{ id: 'c1', name: 'Conta', type: 'checking', balanceCents: 200000 }],
+    cards: [{ id: 'sw', name: 'Swile', kind: KIND.BENEFIT, balanceCents: 80000, balanceAsOf: '2026-08-01', reloadCents: 80000, reloadDay: 5 }],
+  };
+
+  const v = derive({
+    ...base,
+    recurring: [
+      { id: 'a', label: 'Aluguel', kind: 'expense', amountCents: -120000, dayOfMonth: 25, cardId: null },
+      { id: 'l', label: 'Luz', kind: 'expense', amountCents: -18000, dayOfMonth: 25, cardId: 'sw' },
+      { id: 'i', label: 'Internet', kind: 'expense', amountCents: -12000, dayOfMonth: 25, cardId: 'sw' },
+    ],
+  }, DEPOIS);
+
+  const rotulos = [...new Set(v.eventos.map((e) => e.label))];
+  assert.deepEqual(rotulos, ['Aluguel'], 'só o que sai da conta vira evento de caixa');
+  assert.ok(!v.eventos.some((e) => /Luz|Internet/.test(e.label)), 'o vale não passa pela conta');
+});
+
+test('mas o vale desconta essas contas do próprio saldo', async () => {
+  const { valesDe } = await import('../src/core/cards.js');
+  const doc = {
+    cards: [{ id: 'sw', name: 'Swile', kind: KIND.BENEFIT, balanceCents: 80000, balanceAsOf: '2026-08-01', reloadCents: 80000, reloadDay: 5 }],
+    transactions: [],
+    recurring: [
+      { id: 'l', label: 'Luz', kind: 'expense', amountCents: -18000, dayOfMonth: 25, cardId: 'sw' },
+      { id: 'i', label: 'Internet', kind: 'expense', amountCents: -12000, dayOfMonth: 25, cardId: 'sw' },
+    ],
+  };
+  const vale = valesDe(doc, DEPOIS)[0];
+  assert.equal(vale.saldoCents, 50000, 'R$ 800 menos os R$ 300 de contas — senão o dinheiro sumia dos dois lados');
+});
+
+test('o fixo quinzenal no vale desconta as duas vezes', async () => {
+  const { saldoDoBeneficio } = await import('../src/core/cards.js');
+  const card = { id: 'sw', name: 'Swile', kind: KIND.BENEFIT, balanceCents: 80000, balanceAsOf: '2026-08-01' };
+  const r = saldoDoBeneficio(card, [], DEPOIS, [
+    { id: 'd', label: 'Diarista', kind: 'expense', amountCents: -15000, dayOfMonth: 5, dayOfMonth2: 20, every: 'quinzena', cardId: 'sw' },
+  ]);
+  assert.equal(r.saldoCents, 50000, 'R$ 150 duas vezes são R$ 300');
+});
+
+test('fixo de outro cartão não mexe no saldo deste vale', async () => {
+  const { saldoDoBeneficio } = await import('../src/core/cards.js');
+  const card = { id: 'sw', name: 'Swile', kind: KIND.BENEFIT, balanceCents: 80000, balanceAsOf: '2026-08-01' };
+  const r = saldoDoBeneficio(card, [], DEPOIS, [
+    { id: 'l', label: 'Luz', kind: 'expense', amountCents: -18000, dayOfMonth: 25, cardId: 'outro' },
+  ]);
+  assert.equal(r.saldoCents, 80000);
+});

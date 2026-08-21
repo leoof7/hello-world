@@ -138,3 +138,86 @@ test('quando não há mais passos, não há próximo', () => {
   assert.equal(proximoPasso(tudo), null);
   assert.equal(quantosFaltam(tudo), 0);
 });
+
+// ------------------------------------------ as respostas viram documento
+
+import { aplicarConversa } from '../src/core/conversa.js';
+import { emptyDocument } from '../src/data/migrations.js';
+import { derive } from '../src/ui/state.js';
+import { CATEGORIES } from '../src/seed/categories.js';
+
+let n = 0;
+const idFixo = (p) => `${p}_${++n}`;
+const base = () => ({ ...emptyDocument(), categories: CATEGORIES.map((c) => ({ ...c })) });
+
+test('a conversa completa deixa o app pronto para calcular', () => {
+  n = 0;
+  const doc = aplicarConversa(base(), {
+    nome: 'Leandro', idade: 34, renda: 470000, conta: 2173,
+    fixos: [{ label: 'Aluguel', amountCents: 120000 }, { label: 'Luz', amountCents: 18000 }],
+  }, { novoId: idFixo });
+
+  assert.equal(doc.profile.name, 'Leandro');
+  assert.equal(doc.profile.idade, 34);
+  assert.equal(doc.accounts.length, 1);
+  assert.equal(doc.accounts[0].balanceCents, 2173);
+  assert.equal(doc.recurring.filter((r) => r.kind === 'income').length, 1);
+  assert.equal(doc.recurring.filter((r) => r.kind === 'expense').length, 2);
+  assert.ok(doc.recurring.every((r) => r.amountCents !== 0), 'nenhum registro nasce zerado');
+});
+
+test('gasto fixo entra negativo e renda entra positiva', () => {
+  n = 0;
+  const doc = aplicarConversa(base(), {
+    renda: 470000, conta: 0, fixos: [{ label: 'Aluguel', amountCents: 120000 }],
+  }, { novoId: idFixo });
+
+  const renda = doc.recurring.find((r) => r.kind === 'income');
+  const fixo = doc.recurring.find((r) => r.kind === 'expense');
+  assert.ok(renda.amountCents > 0, 'renda positiva');
+  assert.ok(fixo.amountCents < 0, 'gasto negativo — o sinal trocado inverteria a projeção inteira');
+});
+
+test('conta zerada vira conta de verdade, com saldo zero', () => {
+  n = 0;
+  const doc = aplicarConversa(base(), { renda: 470000, conta: 0, fixos: [] }, { novoId: idFixo });
+  assert.equal(doc.accounts.length, 1, 'zero é resposta, não ausência de resposta');
+  assert.equal(doc.accounts[0].balanceCents, 0);
+});
+
+test('conta negativa é guardada negativa', () => {
+  n = 0;
+  const doc = aplicarConversa(base(), { conta: -30000 }, { novoId: idFixo });
+  assert.equal(doc.accounts[0].balanceCents, -30000);
+});
+
+test('quem não respondeu não vira registro vazio', () => {
+  n = 0;
+  const doc = aplicarConversa(base(), { nome: 'Ana' }, { novoId: idFixo });
+  assert.deepEqual(doc.accounts, [], 'sem resposta de conta, sem conta');
+  assert.deepEqual(doc.recurring, [], 'sem renda, sem renda');
+});
+
+test('o fixo entra sem categoria — adivinhar encheria o custo mínimo de palpite', () => {
+  n = 0;
+  const doc = aplicarConversa(base(), {
+    fixos: [{ label: 'Aluguel', amountCents: 120000 }],
+  }, { novoId: idFixo });
+  assert.equal(doc.recurring[0].categoryId, null);
+});
+
+// O teste que importa: o resultado da conversa passa pelo derive() sem quebrar
+// e produz os números que a pessoa espera ver na primeira tela.
+test('depois da conversa o app já sabe renda, saldo e o que sai', () => {
+  n = 0;
+  const doc = aplicarConversa(base(), {
+    nome: 'Leandro', renda: 470000, conta: 2173,
+    fixos: [{ label: 'Aluguel', amountCents: 120000 }, { label: 'Luz', amountCents: 18000 }],
+  }, { novoId: idFixo });
+
+  const v = derive(doc, '2026-08-21');
+  assert.equal(v.rendaFixaCents, 470000);
+  assert.equal(v.saldoCents, 2173);
+  assert.equal(v.fixosCents, 138000);
+  assert.equal(v.fixosSemCategoria.length, 2, 'e a Saúde já sabe cobrar as categorias');
+});

@@ -203,3 +203,56 @@ export const completo = (respostas = {}) =>
 /** O texto da pergunta, que pode depender do que já foi respondido. */
 export const textoDaPergunta = (passo, ctx = {}) =>
   typeof passo.pergunta === 'function' ? passo.pergunta(ctx) : passo.pergunta;
+
+/**
+ * As respostas viram documento.
+ *
+ * Mora no núcleo, e não na tela, por dois motivos: aqui dá para testar sem
+ * navegador, e é o único jeito de garantir que o chat grave EXATAMENTE nos
+ * mesmos campos que os formulários. Um caminho paralelo de gravação é como
+ * duas telas passam a discordar sobre o mesmo dinheiro.
+ *
+ * `novoId` entra por parâmetro para o teste poder prever os ids.
+ */
+export function aplicarConversa(doc, respostas = {}, { novoId = idPadrao } = {}) {
+  const novo = { ...doc, profile: { ...doc.profile } };
+
+  if (respostas.nome) novo.profile.name = respostas.nome;
+  if (respostas.idade) novo.profile.idade = respostas.idade;
+
+  novo.recurring = [...(doc.recurring || [])];
+  novo.accounts = [...(doc.accounts || [])];
+
+  if (respostas.renda > 0) {
+    novo.recurring.push({
+      id: novoId('rc'), label: 'Renda', kind: 'income',
+      amountCents: respostas.renda, dayOfMonth: 5, every: 'mes', dayOfMonth2: null,
+      categoryId: null, fixed: true,
+    });
+  }
+
+  // `!= null` e não `> 0`: conta zerada é resposta legítima, e conta negativa
+  // também. Só a ausência de resposta é que não vira conta.
+  if (respostas.conta != null) {
+    novo.accounts.push({
+      id: novoId('ac'), name: 'Conta', type: 'checking',
+      balanceCents: respostas.conta, monthlyRate: 0,
+    });
+  }
+
+  for (const fixo of respostas.fixos || []) {
+    novo.recurring.push({
+      id: novoId('rc'), label: fixo.label, kind: 'expense',
+      amountCents: -Math.abs(fixo.amountCents), dayOfMonth: 10, every: 'mes', dayOfMonth2: null,
+      // Sem categoria de propósito. Chutar "moradia" para tudo que a pessoa
+      // listou encheria o custo de vida mínimo de palpite, e esse é o número
+      // que decide quanto sobra para pagar dívida. A Saúde já cobra os fixos
+      // sem categoria — cobrar é mais honesto que adivinhar.
+      categoryId: null, fixed: true,
+    });
+  }
+
+  return novo;
+}
+
+const idPadrao = (p) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

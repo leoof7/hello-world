@@ -22,7 +22,7 @@
 // O cofre vive no IndexedDB e o service worker nem o enxerga. Nada aqui toca
 // nos seus dados.
 
-const VERSAO = '77bfefe67618';
+const VERSAO = '9d90956dfae0';
 const CACHE = `zero-${VERSAO}`;
 
 const ARQUIVOS = [
@@ -68,6 +68,7 @@ const ARQUIVOS = [
   './src/ui/dom.js',
   './src/ui/tema.js',
   './src/ui/frase.js',
+  './src/ui/bate-papo.js',
 ];
 
 self.addEventListener('install', (e) => {

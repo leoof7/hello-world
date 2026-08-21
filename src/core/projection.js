@@ -44,6 +44,14 @@ export function buildEvents({ recurring = [], statements = [], scheduled = [] },
   const events = [];
 
   for (const r of recurring) {
+    // Fixo que sai do vale não passa pela conta corrente.
+    //
+    // É o caso de quem paga água, luz e internet no cartão de benefício: o
+    // dinheiro é do vale e nunca esteve na conta. Descontar aqui faria o app
+    // prever furo de caixa por dinheiro que não vai sair de lá — o mesmo erro
+    // que já foi corrigido para as compras avulsas no vale.
+    if (r.foraDoCaixa) continue;
+
     const dias = diasDoRecorrente(r);
     let key = monthKey(fromISO);
     for (let i = 0; i < 24; i++) {

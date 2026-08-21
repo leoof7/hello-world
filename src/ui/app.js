@@ -390,13 +390,15 @@ async function primeiroConteudo() {
        telas funcionando — é um cenário <b>fictício</b>, fica marcado como exemplo em
        todas as telas e sai com um toque quando você quiser.</p>
     <div class="btns" style="width:100%;max-width:340px;flex-direction:column">
-      <button class="btn primary" id="vazio">Começar do zero com os meus dados</button>
+      <button class="btn primary" id="conversa">Me pergunta, eu respondo</button>
+      <button class="btn ghost" id="vazio">Prefiro preencher na mão</button>
       <button class="btn ghost" id="exemplo">Só espiar o exemplo primeiro</button>
       <button class="btn ghost" id="backup">Restaurar de um backup</button>
     </div>
   `);
 
   const escolha = await new Promise((r) => {
+    $('#conversa').onclick = () => r('conversa');
     $('#vazio').onclick = () => r('vazio');
     $('#exemplo').onclick = () => r('exemplo');
     $('#backup').onclick = () => r('backup');
@@ -414,8 +416,27 @@ async function primeiroConteudo() {
     // deu errado ou desistiu: começa vazio, e o backup continua disponível em Tudo
   }
 
+  if (escolha === 'conversa') {
+    const respostas = await conversarNoArranque();
+    if (respostas) {
+      const { aplicarConversa } = await import('../core/conversa.js');
+      app.doc = await db.save(app.key, aplicarConversa(documentoNovo(), respostas));
+      return;
+    }
+    // saiu no meio: cai no documento vazio e o app segue pelos formulários
+  }
+
   app.doc = await db.save(app.key, documentoNovo());
 }
+
+/** Roda o cadastro por conversa na tela de arranque. */
+async function conversarNoArranque() {
+  const { conversarCadastro } = await import('./bate-papo.js');
+  return conversarCadastro({
+    montar: (html) => { document.getElementById('app').innerHTML = html; },
+  });
+}
+
 
 /** Documento em branco, já com as categorias — sem elas não há como classificar nada. */
 export function documentoNovo() {

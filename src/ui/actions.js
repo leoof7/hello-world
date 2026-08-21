@@ -442,6 +442,69 @@ const ACOES = {
     draw();
   },
 
+  /**
+   * Tira o aviso da tela — sem apagar o problema.
+   *
+   * Ele continua contando na campainha. Quem some com um aviso de conta
+   * ficando negativa não quer que o problema suma; quer que a tela pare de
+   * gritar enquanto resolve. Apagar de verdade seria o app esconder dinheiro.
+   */
+  async 'dispensar-aviso'({ id }) {
+    if (!id) return;
+    await commit((d) => {
+      const lista = new Set(d.avisosDispensados || []);
+      lista.add(id);
+      // Não deixa crescer para sempre: aviso é do dia, e id que não existe
+      // mais só ocupa espaço no cofre.
+      d.avisosDispensados = [...lista].slice(-60);
+    });
+    toast('Fora da tela. Continua na campainha.');
+  },
+
+  /** A campainha: tudo que está valendo hoje, inclusive o que saiu da tela. */
+  async 'central-avisos'() {
+    const v = app.view;
+    if (!v.avisos.length) {
+      toast(v.revisao.length ? `${v.revisao.length} lançamentos esperando revisão.` : 'Nenhum aviso agora.');
+      if (v.revisao.length) go('revisao');
+      return;
+    }
+
+    const escolha = await sheet(
+      `<h4>Avisos</h4>
+       <p class="sub">O que está valendo hoje. Os que você tirou da tela continuam aqui.</p>
+       <div class="list">${v.avisos.map((a) => `
+         <button class="row" data-ir="${esc(a.tela)}">
+           <div class="ic ${a.urgencia >= 90 ? 'r' : 'a'}">${icon(a.urgencia >= 90 ? 'alerta' : 'sino')}</div>
+           <div class="bd"><div class="t">${esc(a.titulo)}</div>
+             <div class="s">${pilulasDaLinha([
+               a.texto,
+               v.avisosDispensados.some((x) => x.id === a.id) ? 'fora da tela' : null,
+             ])}</div></div>
+           <span class="arr">${icon('seta')}</span>
+         </button>`).join('')}</div>
+       <div class="btns">
+         ${v.avisosDispensados.length ? '<button class="btn ghost" data-voltar="1">Trazer todos de volta</button>' : ''}
+         <button class="btn ghost" data-x="1">Fechar</button>
+       </div>`,
+      {
+        onMount: (card, fechar) => {
+          card.querySelector('[data-x]').onclick = () => fechar(null);
+          card.querySelector('[data-voltar]')?.addEventListener('click', () => fechar('voltar'));
+          card.querySelectorAll('[data-ir]').forEach((b) => { b.onclick = () => fechar(b.dataset.ir); });
+        },
+      }
+    );
+
+    if (!escolha) return;
+    if (escolha === 'voltar') {
+      await commit((d) => { d.avisosDispensados = []; });
+      toast('Todos de volta na tela.');
+      return;
+    }
+    go(escolha);
+  },
+
   // ---- lançamentos ----
   async novo() { await editarLancamento(null); },
   async editar({ id }) { await editarLancamento(id); },
@@ -2042,7 +2105,22 @@ async function editarRecorrente(id, kind) {
       { name: 'dia', label: 'Todo dia', type: 'number', value: r0?.dayOfMonth || 5, min: 1, max: 28,
         hint: 'até 28, para o dia existir em todos os meses' },
       { name: 'dia2', label: 'E também dia', type: 'number', value: r0?.dayOfMonth2 || 20, min: 1, max: 28 },
-      ...(entrada ? [] : [{ name: 'categoryId', label: 'Categoria', type: 'select', value: r0?.categoryId || '', options: opcoesCategoria() }]),
+      ...(entrada ? [] : [
+        { name: 'categoryId', label: 'Categoria', type: 'select', value: r0?.categoryId || '', options: opcoesCategoria() },
+        // De onde essa conta sai. Importa de verdade quando sai de um vale:
+        // água, luz e internet pagas no cartão de benefício não passam pela
+        // conta corrente, e descontá-las de lá faria o app prever furo de
+        // caixa por dinheiro que nunca vai sair de lá.
+        { name: 'origemFixo', label: 'Sai de onde', type: 'select', value: r0?.cardId || '',
+          options: [
+            { value: '', label: 'Da conta corrente' },
+            ...app.doc.cards.map((c) => ({
+              value: c.id,
+              label: `${c.name}${ehBeneficio(c) ? ' — vale' : ehDebito(c) ? ' — débito' : ' — cartão'}`,
+            })),
+          ],
+          hint: 'se você paga essa conta no vale, escolha ele aqui — o valor sai do saldo do vale e não da conta' },
+      ]),
     ], {
       ok: 'Salvar',
       apagar: r0 ? 'Apagar' : null,
@@ -2084,6 +2162,7 @@ async function editarRecorrente(id, kind) {
     dayOfMonth2: quinzenal ? dia(r.dia2, 20) : null,
     kind,
     categoryId: r.categoryId || null,
+    cardId: entrada ? null : (r.origemFixo || null),
     fixed: true,
   };
   await commit((d) => {
