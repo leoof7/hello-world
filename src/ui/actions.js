@@ -9,6 +9,7 @@ import { toCents, brl, formatCents, sum } from '../core/money.js';
 import { monthKey, formatShort, formatMonthKey } from '../core/dates.js';
 import { parseEntry, splitEntries } from '../core/parse.js';
 import { expand } from '../core/installments.js';
+import { lancamentosDoPrint, jaExiste } from '../core/notificacao.js';
 import { diasDoRecorrente, mensalDoRecorrente } from '../core/projection.js';
 import { learn } from '../core/categorize.js';
 import { KIND as KIND_DIVIDA, validateDebt, ativa, somenteAtivas } from '../core/debts.js';
@@ -406,6 +407,24 @@ function escolherArquivo(accept) {
   });
 }
 
+/**
+ * Escolhe uma imagem e devolve o arquivo cru.
+ *
+ * Separada de `escolherArquivo` porque aquela lê como texto, e imagem lida
+ * como texto vira lixo. `capture` fica de fora de propósito: sem ele o iPhone
+ * abre a bandeja com Fototeca junto da câmera, e o print que a pessoa acabou
+ * de tirar está na fototeca, não na câmera.
+ */
+function escolherImagem() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => resolve(input.files?.[0] || null);
+    input.click();
+  });
+}
+
 // -------------------------------------------------------------------- ações
 
 const ACOES = {
@@ -574,6 +593,7 @@ const ACOES = {
   // ---- lançamentos ----
   async novo() { await editarLancamento(null); },
   async editar({ id }) { await editarLancamento(id); },
+  async 'ler-print'() { await lerPrint(); },
 
   async falar() {
     const frase = await pedirFrase();
@@ -1787,6 +1807,18 @@ async function formularioDoCartao(c, kind, id) {
       placeholder: kind === KIND.BENEFIT ? 'Vale Alimentação' : kind === KIND.DEBIT ? 'Débito Itaú' : 'Nubank' },
   ];
 
+  if (kind !== KIND.BENEFIT) {
+    // Os quatro dígitos finais são o que faz o lançamento por print cair no
+    // cartão certo sozinho: quase toda notificação de compra diz "final 4321".
+    // Sem eles, todo gasto lido de um print cai sem cartão e a pessoa corrige
+    // um por um — que é o trabalho que o print existe para eliminar.
+    campos.push({
+      name: 'last4', label: 'Quatro últimos dígitos', type: 'text',
+      value: c?.last4 || '', placeholder: '4321',
+      hint: 'opcional. É por aqui que o app reconhece o cartão ao ler um print de notificação',
+    });
+  }
+
   if (kind === KIND.CREDIT) {
     campos.push(
       { name: 'closingDay', label: 'Fecha dia', type: 'number', value: c?.closingDay || 20, min: 1, max: 31 },
@@ -1897,6 +1929,9 @@ async function formularioDoCartao(c, kind, id) {
     closingDay: kind === KIND.CREDIT ? dia(r.closingDay, 20) : null,
     dueDay: kind === KIND.CREDIT ? dia(r.dueDay, 27) : null,
     limitCents: kind === KIND.CREDIT ? r.limite : 0,
+    // Só guarda se forem mesmo quatro dígitos. "últimos 4" com três números
+    // casaria errado ou nunca casaria, e vazio é melhor que errado.
+    last4: /^\d{4}$/.test(String(r.last4 || '').trim()) ? String(r.last4).trim() : null,
     accountId: contaId || null,
     balanceCents: kind === KIND.BENEFIT ? r.saldo : 0,
     // O saldo digitado vale de hoje em diante. Sem esta data, as compras que o
@@ -2173,6 +2208,188 @@ async function editarDivida(id) {
     toast(registro.active ? 'Salvo.' : 'Salvo — pausada, fora das contas do mês.');
     return;
   }
+}
+
+// ------------------------------------------------ lançar por print
+//
+// O caminho mais curto entre "gastei" e "está no app". Digitar gasto a gasto é
+// o motivo número um de largar um app de finanças — não porque seja difícil,
+// mas porque é toda vez. Um print da central de notificações traz o dia
+// inteiro de uma vez.
+//
+// Nada entra sem confirmação. O OCR erra, e erro de OCR em dinheiro é do tipo
+// que passa despercebido: R$ 45,90 vira R$ 4,90 e o número continua plausível.
+// Por isso a última palavra é sempre de quem está olhando.
+
+async function lerPrint() {
+  const ocr = await import('../io/ocr.js');
+
+  // Baixar 9 MB sem avisar, possivelmente no 4G da pessoa, seria falta de
+  // educação. Uma vez baixado, fica no cache do service worker e nunca mais
+  // pergunta.
+  if (!(await ocr.jaBaixado())) {
+    const segue = await confirmar({
+      titulo: 'Baixar o leitor de print',
+      texto: `São ${ocr.TAMANHO_MB} MB, uma vez só. Depois disso funciona offline, `
+        + 'e a imagem nunca sai do aparelho — quem lê é o próprio celular.',
+      ok: 'Baixar',
+    });
+    if (!segue) return;
+  }
+
+  const imagem = await escolherImagem();
+  if (!imagem) return;
+
+  const texto = await comBarra(async (andar) => {
+    try {
+      return await ocr.lerImagem(imagem, andar);
+    } catch (e) {
+      toast(/network|fetch|load/i.test(String(e?.message))
+        ? 'Não consegui baixar o leitor. Confira a conexão e tente de novo.'
+        : 'Não consegui ler essa imagem.');
+      return null;
+    }
+  });
+  if (texto === null) return;
+
+  const achados = lancamentosDoPrint(texto, {
+    cards: app.doc.cards,
+    todayISO: app.todayISO,
+  });
+
+  if (!achados.length) {
+    await sheet(
+      `<h4>Não achei lançamento nenhum</h4>
+       <p class="sub">O leitor passou pela imagem mas não encontrou nada com cara de valor.
+         Prints da central de notificações funcionam melhor que foto de tela de outro celular.</p>
+       <p class="sub" style="font-size:11px;opacity:.7;max-height:120px;overflow:auto;white-space:pre-wrap">${
+         esc(texto.slice(0, 400) || '(nada)')}</p>
+       <div class="btns"><button class="btn primary" data-x="1" style="width:100%">Fechar</button></div>`,
+      { onMount: (card, fechar) => { card.querySelector('[data-x]').onclick = () => fechar(null); } }
+    );
+    return;
+  }
+
+  await confirmarPrint(achados);
+}
+
+/** Roda algo demorado com uma barra de progresso na tela. */
+async function comBarra(trabalho) {
+  let fecharFolha = () => {};
+  let barra = null;
+
+  const folha = sheet(
+    `<h4>Lendo o print</h4>
+     <p class="sub" id="ocr-msg">Isto acontece dentro do seu aparelho. Nenhuma imagem é enviada para lugar nenhum.</p>
+     <div class="bar" style="margin-top:6px"><i id="ocr-bar" style="width:4%;background:var(--jade)"></i></div>`,
+    {
+      onMount: (card, fechar) => {
+        fecharFolha = fechar;
+        barra = card.querySelector('#ocr-bar');
+      },
+    }
+  );
+
+  try {
+    return await trabalho((p) => {
+      if (barra) barra.style.width = `${Math.round(Math.max(0.04, Math.min(1, p)) * 100)}%`;
+    });
+  } finally {
+    fecharFolha(null);
+    await folha.catch(() => {});
+  }
+}
+
+/**
+ * A folha de confirmação.
+ *
+ * Vem marcado o que o app tem confiança de ter entendido, e desmarcado o
+ * resto — inclusive o que parece duplicata do que já está lançado. A pessoa
+ * revisa uma lista em vez de digitar quatro lançamentos, que é a diferença
+ * entre usar e não usar.
+ */
+async function confirmarPrint(achados) {
+  const comDuplicata = achados.map((a) => ({
+    ...a,
+    duplicata: jaExiste(a, app.doc.transactions),
+  }));
+
+  const linha = (a, i) => `
+    <label class="row" style="align-items:center;gap:10px;cursor:pointer">
+      <input type="checkbox" data-i="${i}" ${a.duplicata || a.confianca < 0.6 ? '' : 'checked'}
+        style="width:20px;height:20px;flex:0 0 auto">
+      <div class="bd" style="min-width:0">
+        <div class="t">${esc(a.description || 'Sem descrição')}</div>
+        <div class="s">${pilulasDaLinha([
+          a.amountCents > 0 ? 'entrada' : null,
+          a.installments > 1 ? `${a.installments}x` : null,
+          a.final ? `final ${a.final}` : null,
+          a.duplicata ? 'talvez já lançado' : null,
+          a.confianca < 0.6 ? 'confira' : null,
+        ])}</div>
+      </div>
+      <div class="rt"><div class="amt num" style="color:var(--${a.amountCents > 0 ? 'positivo' : 'negativo'})">
+        ${formatCents(a.amountCents)}</div></div>
+    </label>`;
+
+  const escolhidos = await sheet(
+    `<h4>${comDuplicata.length} ${comDuplicata.length === 1 ? 'lançamento encontrado' : 'lançamentos encontrados'}</h4>
+     <p class="sub">Desmarque o que não for. A data fica sendo hoje — dá para corrigir depois em cada um.</p>
+     <div class="list" style="max-height:46vh;overflow:auto">${comDuplicata.map(linha).join('')}</div>
+     <div class="btns">
+       <button class="btn primary" data-a="ok">Lançar marcados</button>
+       <button class="btn ghost" data-a="no">Cancelar</button>
+     </div>`,
+    {
+      onMount: (card, fechar) => {
+        card.querySelector('[data-a="ok"]').onclick = () => fechar(
+          [...card.querySelectorAll('input[data-i]')]
+            .filter((c) => c.checked)
+            .map((c) => comDuplicata[Number(c.dataset.i)])
+        );
+        card.querySelector('[data-a="no"]').onclick = () => fechar(null);
+      },
+    }
+  );
+
+  if (!escolhidos?.length) return;
+
+  await commit((d) => {
+    for (const a of escolhidos) {
+      const descricao = a.description || 'Lançado por print';
+      const cartao = a.cardId ? d.cards.find((c) => c.id === a.cardId) : null;
+
+      // Parcelado no print vira parcelado no app pelo MESMO motor do
+      // lançamento manual. Escrever a divisão aqui seria uma segunda verdade
+      // sobre parcela — e a regra do resto na primeira, o ciclo da fatura e a
+      // competência de cada uma já moram lá.
+      //
+      // Precisa do cartão de verdade: sem fechamento e vencimento não dá para
+      // dizer em que fatura cada parcela cai. Sem ele, entra como um gasto só.
+      if (a.installments > 1 && cartao) {
+        d.transactions = [...d.transactions, ...expand({
+          id: novoId('t'),
+          cardId: cartao.id,
+          date: a.date,
+          totalCents: a.amountCents,
+          count: a.installments,
+          description: descricao,
+          categoryId: null,
+        }, cartao)];
+      } else {
+        d.transactions = [...d.transactions, {
+          id: novoId('t'),
+          date: a.date,
+          amountCents: a.amountCents,
+          description: descricao,
+          cardId: a.cardId || null,
+          categoryId: null,
+        }];
+      }
+    }
+  });
+
+  toast(`${escolhidos.length} ${escolhidos.length === 1 ? 'lançamento' : 'lançamentos'} do print. Confira a categoria em Revisão.`);
 }
 
 /** A saída de uma dívida merece mais que um toast — principalmente a última. */

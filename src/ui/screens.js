@@ -613,8 +613,9 @@ function painel(app) {
     <span class="ze-txt">Fala aí, o Zé tá ouvindo</span>
   </button>
 
-  <div class="quick">
+  <div class="quick cinco">
     <button class="qa" data-act="novo"><div class="ic">${icon('mais')}</div><span>Lançar</span></button>
+    <button class="qa" data-act="ler-print"><div class="ic">${icon('camera')}</div><span>Print</span></button>
     <button class="qa" data-act="simular"><div class="ic">${icon('ajuda')}</div><span>Posso?</span></button>
     <button class="qa" data-go="faturas"><div class="ic">${icon('cartao')}</div><span>Fatura</span></button>
     <button class="qa" data-go="revisao"><div class="ic">${icon('lista')}</div><span>Revisão${v.revisao.length ? ` ${v.revisao.length}` : ''}</span></button>
@@ -2101,6 +2102,20 @@ function cofrinho(g, app) {
 
 // ============================================================ INVESTIMENTOS
 
+/**
+ * Investimentos e patrimônio.
+ *
+ * O visor mostra o que você TEM — contas, cofrinhos, bens. Ele mostrava o
+ * líquido, e aí desligar uma dívida mexia no número de cima numa tela que não
+ * fala de dívida: a pessoa pausava uma negociação e via o patrimônio saltar,
+ * sem nada explicando de onde veio.
+ *
+ * A dívida continua com poder aqui, só que na linha de baixo e com a flag
+ * mandando: ativa entra na subtração, pausada não entra em conta nenhuma —
+ * é a mesma regra que vale no app inteiro, vinda de `dividasAtivas`. E o app
+ * diz em voz alta quantas ficaram de fora, para o número não mentir por
+ * omissão.
+ */
 function investimentos(app) {
   const v = app.view;
   const s = v.saude;
@@ -2112,9 +2127,14 @@ function investimentos(app) {
   ${header(app)}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Patrimônio</span>${avatar(app, "sm")}${botaoOlho("patrimonio")}</div>
-    <div class="big ser">${olho(app, "patrimonio", m(s.netWorth.netCents, brlShort))}</div>
-    <div class="foot"><span class="acc">${m(s.netWorth.contasCents, brlShort)} em contas · ${m(s.netWorth.bensCents, brlShort)} em bens · ${m(s.netWorth.liabilitiesCents, brlShort)} em dívidas</span></div>
+    <div class="top"><span class="lbl">O que você tem</span>${avatar(app, "sm")}${botaoOlho("patrimonio")}</div>
+    <div class="big ser">${olho(app, "patrimonio", m(s.netWorth.assetsCents, brlShort))}</div>
+    <div class="foot"><span class="acc">${m(s.netWorth.contasCents, brlShort)} em contas · ${m(v.emCofrinhosCents, brlShort)} em cofrinhos · ${m(s.netWorth.bensCents, brlShort)} em bens</span></div>
+    ${s.netWorth.liabilitiesCents > 0 ? `<div class="foot" style="margin-top:4px"><span class="acc" style="opacity:.75">
+      menos ${olho(app, 'patrimonio', m(s.netWorth.liabilitiesCents, brlShort))} de dívida ativa ·
+      líquido ${olho(app, 'patrimonio', m(s.netWorth.netCents, brlShort))}</span></div>` : ''}
+    ${v.dividasDesligadas.length ? `<div class="foot" style="margin-top:3px"><span class="acc" style="opacity:.6">
+      ${v.dividasDesligadas.length} ${v.dividasDesligadas.length === 1 ? 'dívida pausada não entra' : 'dívidas pausadas não entram'} nesta conta</span></div>` : ''}
   </div>
 
   <div class="sec">

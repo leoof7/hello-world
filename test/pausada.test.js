@@ -128,3 +128,39 @@ test('renda sem categoria não é cobrada como gasto sem categoria', () => {
   }), HOJE);
   assert.deepEqual(v.fixosSemCategoria, [], 'entrada não tem custo mínimo para compor');
 });
+
+// ------------------ a flag da dívida manda também no visor de Investimentos
+//
+// O visor mostrava o líquido, então pausar uma dívida fazia o número de cima
+// saltar numa tela que não fala de dívida. Agora o topo é o que você tem, e a
+// dívida entra na linha de baixo — quando está ativa.
+
+test('o que você tem não muda quando uma dívida é pausada', () => {
+  const base = {
+    ...emptyDocument(),
+    accounts: [{ id: 'a1', name: 'Conta', type: 'checking', balanceCents: 500000 }],
+    debts: [{ id: 'd1', name: 'Cartão', kind: 'revolving', balanceCents: 200000, monthlyRate: 0.15 }],
+  };
+  const ativa = derive(base, HOJE);
+  const pausada = derive({ ...base, debts: [{ ...base.debts[0], active: false }] }, HOJE);
+  assert.equal(
+    pausada.saude.netWorth.assetsCents,
+    ativa.saude.netWorth.assetsCents,
+    'o que você tem é ativo, não depende de dívida nenhuma');
+});
+
+test('mas a dívida pausada sai da subtração e do líquido', () => {
+  const base = {
+    ...emptyDocument(),
+    accounts: [{ id: 'a1', name: 'Conta', type: 'checking', balanceCents: 500000 }],
+    debts: [{ id: 'd1', name: 'Cartão', kind: 'revolving', balanceCents: 200000, monthlyRate: 0.15 }],
+  };
+  const ativa = derive(base, HOJE);
+  const pausada = derive({ ...base, debts: [{ ...base.debts[0], active: false }] }, HOJE);
+
+  assert.equal(ativa.saude.netWorth.liabilitiesCents, 200000);
+  assert.equal(ativa.saude.netWorth.netCents, 300000);
+  assert.equal(pausada.saude.netWorth.liabilitiesCents, 0, 'pausada não entra em conta nenhuma');
+  assert.equal(pausada.saude.netWorth.netCents, 500000);
+  assert.equal(pausada.dividasDesligadas.length, 1, 'e a tela tem como avisar que ficou uma de fora');
+});

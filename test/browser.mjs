@@ -1172,7 +1172,85 @@ async function mostrarCard(page, seletor) {
   await ctx.close();
 }
 
+// ------------------------------------------------------------- ler print
+//
+// O OCR de verdade, no navegador de verdade. Não vale simular: o valor do
+// recurso está inteiro na pergunta "ele consegue LER?", e essa é a única
+// pergunta que teste de unidade não responde.
+//
+// O print é desenhado num canvas com a mesma cara de uma central de
+// notificações — fundo escuro, texto claro — e com as armadilhas reais:
+// relógio no topo, valor com separador de milhar, quatro dígitos de cartão
+// que não podem virar preço, e uma entrada no meio das saídas.
+
+{
+  console.log('\nler print de notificação');
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+
+  const lido = await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 780; c.height = 700;
+    const g = c.getContext('2d');
+    g.fillStyle = '#111318'; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#ffffff';
+
+    const linhas = [
+      ['600 28px sans-serif', '9:41', 40],
+      ['500 26px sans-serif', 'Nubank', 130],
+      ['600 30px sans-serif', 'Compra aprovada', 175],
+      ['400 28px sans-serif', 'R$ 45,90 em PADARIA CENTRAL', 220],
+      ['500 26px sans-serif', 'Nubank', 320],
+      ['600 30px sans-serif', 'Compra aprovada no cartao final 4321', 365],
+      ['400 28px sans-serif', 'R$ 1.289,00 em MAGAZINE LUIZA', 410],
+      ['500 26px sans-serif', 'Itau', 510],
+      ['600 30px sans-serif', 'Pix recebido', 555],
+      ['400 28px sans-serif', 'Voce recebeu R$ 1.200,00 de EMPRESA XPTO', 600],
+    ];
+    for (const [fonte, texto, y] of linhas) { g.font = fonte; g.fillText(texto, 40, y); }
+
+    const blob = await new Promise((ok) => c.toBlob(ok, 'image/png'));
+    const ocr = await import('./src/io/ocr.js');
+    const texto = await ocr.lerImagem(blob, () => {});
+    await ocr.desligarMotor();
+
+    const { lancamentosDoPrint } = await import('./src/core/notificacao.js');
+    return {
+      texto,
+      achados: lancamentosDoPrint(texto, {
+        cards: [{ id: 'c1', name: 'Nu', last4: '4321' }],
+        todayISO: '2026-08-24',
+      }),
+    };
+  });
+
+  const valores = lido.achados.map((a) => a.amountCents);
+  const visto = `${lido.achados.length} achados: ${valores.join(', ')}`;
+
+  ok('o leitor achou as três notificações', lido.achados.length === 3, visto);
+  ok('o valor com separador de milhar sobreviveu ao OCR', valores.includes(-128900), visto);
+  ok('e o valor simples também', valores.includes(-4590), visto);
+  ok('pix recebido entrou como entrada, não como gasto', valores.includes(120000), visto);
+  // O erro que faria o app inventar dinheiro sozinho.
+  ok('o relógio do topo não virou lançamento',
+    !valores.some((v) => Math.abs(v) === 941 || Math.abs(v) === 94100), visto);
+  ok('os quatro dígitos do cartão não viraram preço',
+    !valores.some((v) => Math.abs(v) === 432100), visto);
+  ok('e levaram a compra para o cartão certo',
+    lido.achados.some((a) => a.cardId === 'c1' && a.amountCents === -128900),
+    JSON.stringify(lido.achados.map((a) => [a.amountCents, a.cardId])));
+  ok('o motor não deixou erro no console', erros.length === 0, erros.join(' | '));
+
+  if (lido.achados.length !== 3) console.log(`  texto lido:\n${lido.texto}`);
+
+  await ctx.close();
+}
+
 await browser.close();
+
 
 console.log(falhas ? `\n${falhas} verificações falharam` : '\ntudo passou');
 process.exit(falhas ? 1 : 0);

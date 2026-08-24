@@ -41,6 +41,7 @@ const ICONS = {
   escudo: '<path d="M12 21s7-4.5 7-10V5.5L12 3 5 5.5V11c0 5.5 7 10 7 10z"/>',
   escudoOk: '<path d="M12 21s7-4.5 7-10V5.5L12 3 5 5.5V11c0 5.5 7 10 7 10z"/><path d="m9.5 11.5 1.8 1.8 3.4-3.6"/>',
   grafico: '<path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/>',
+  camera: '<path d="M3 8.5A2 2 0 0 1 5 6.5h2l1.3-2h7.4l1.3 2h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.4"/>',
   menu: '<circle cx="5.5" cy="5.5" r="2.5"/><circle cx="5.5" cy="12" r="2.5"/><circle cx="5.5" cy="18.5" r="2.5"/><path d="M11 5.5h9M11 12h9M11 18.5h9"/>',
   microfone: '<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
   busca: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',

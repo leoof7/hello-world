@@ -22,7 +22,7 @@
 // O cofre vive no IndexedDB e o service worker nem o enxerga. Nada aqui toca
 // nos seus dados.
 
-const VERSAO = 'becbce411b20';
+const VERSAO = '9f455a45125f';
 const CACHE = `zero-${VERSAO}`;
 
 const ARQUIVOS = [
@@ -50,6 +50,7 @@ const ARQUIVOS = [
   './src/core/insights.js',
   './src/core/perfil.js',
   './src/core/parse.js',
+  './src/core/notificacao.js',
   './src/data/db.js',
   './src/data/crypto.js',
   './src/data/recovery.js',
@@ -59,6 +60,10 @@ const ARQUIVOS = [
   './src/io/csv.js',
   './src/io/ofx.js',
   './src/io/ics.js',
+  // O leitor de print, sim. O motor de OCR em vendor/, NÃO: são 9 MB, e no
+  // pré-cache toda instalação pagaria isso antes da primeira tela. Ele é
+  // baixado na primeira vez que alguém usa e fica no cache a partir dali.
+  './src/io/ocr.js',
   './src/seed/categories.js',
   './src/seed/seed.js',
   './src/ui/app.js',
