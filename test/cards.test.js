@@ -54,8 +54,19 @@ test('débito com conta de verdade passa', () => {
 });
 
 test('crédito com dia fora do calendário é recusado', () => {
-  const erros = validarCartao({ ...credito, closingDay: 0, dueDay: 45 }, {});
+  const erros = validarCartao({ ...credito, closingDay: 0, dueDay: 45, accountId: 'c1' }, { accounts: [{ id: 'c1' }] });
   assert.equal(erros.length, 2, 'os dois dias entram na conta');
+});
+
+// A fatura vence e o dinheiro sai de algum lugar. Cartão de crédito sem conta
+// é dinheiro saindo do nada.
+test('crédito sem conta também é recusado', () => {
+  const erros = validarCartao({ ...credito, accountId: null }, { accounts: [{ id: 'c1' }] });
+  assert.ok(erros.some((e) => /de crédito precisa de uma conta/.test(e)), JSON.stringify(erros));
+});
+
+test('crédito com conta de verdade passa', () => {
+  assert.deepEqual(validarCartao({ ...credito, accountId: 'c1' }, { accounts: [{ id: 'c1' }] }), []);
 });
 
 test('vale com recarga precisa do dia da recarga', () => {
@@ -331,4 +342,57 @@ test('fixo de outro cartão não mexe no saldo deste vale', async () => {
     { id: 'l', label: 'Luz', kind: 'expense', amountCents: -18000, dayOfMonth: 25, cardId: 'outro' },
   ]);
   assert.equal(r.saldoCents, 80000);
+});
+
+// ------------------------------------------------- o gasto cabe?
+//
+// A regra não bloqueia: estourar o limite e ficar no vermelho acontecem na
+// vida real, e um app que se recusa a registrar isso mente por omissão. O que
+// ela evita é o app aceitar CALADO — hoje um gasto maior que o saldo entrava
+// sem uma palavra, e a pessoa descobria dias depois com a projeção negativa.
+
+test('gasto maior que o saldo da conta não passa calado', async () => {
+  const { cabeOGasto } = await import('../src/core/cards.js');
+  const r = cabeOGasto({ valorCents: 50000, conta: { name: 'XP', balanceCents: 2173 } });
+  assert.equal(r.cabe, false);
+  assert.equal(r.faltamCents, 47827);
+  assert.match(r.motivo, /XP/);
+});
+
+test('gasto que cabe no saldo passa sem atrito', async () => {
+  const { cabeOGasto } = await import('../src/core/cards.js');
+  assert.equal(cabeOGasto({ valorCents: 1000, conta: { name: 'XP', balanceCents: 2173 } }).cabe, true);
+});
+
+test('conta negativa diz que está negativa, não "tem R$ -30"', async () => {
+  const { cabeOGasto } = await import('../src/core/cards.js');
+  const r = cabeOGasto({ valorCents: 1000, conta: { name: 'XP', balanceCents: -3000 } });
+  assert.equal(r.cabe, false);
+  assert.match(r.motivo, /negativa/);
+});
+
+test('crédito respeita o limite livre, não o limite total', async () => {
+  const { cabeOGasto } = await import('../src/core/cards.js');
+  const card = { name: 'Nubank', kind: KIND.CREDIT, limitCents: 500000, availableCents: 30000 };
+  assert.equal(cabeOGasto({ valorCents: 25000, card }).cabe, true);
+  assert.equal(cabeOGasto({ valorCents: 50000, card }).cabe, false);
+});
+
+test('limite não informado não vira limite zero', async () => {
+  const { cabeOGasto } = await import('../src/core/cards.js');
+  const card = { name: 'Sem limite', kind: KIND.CREDIT, limitCents: 0 };
+  assert.equal(cabeOGasto({ valorCents: 900000, card }).cabe, true,
+    'campo em branco é falta de informação, não ausência de limite');
+});
+
+test('vale barra pelo saldo do próprio vale', async () => {
+  const { cabeOGasto } = await import('../src/core/cards.js');
+  const card = { name: 'Swile', kind: KIND.BENEFIT };
+  assert.equal(cabeOGasto({ valorCents: 10000, card, vale: { saldoCents: 45000 } }).cabe, true);
+  assert.equal(cabeOGasto({ valorCents: 50000, card, vale: { saldoCents: 45000 } }).cabe, false);
+});
+
+test('valor zero não dispara aviso nenhum', async () => {
+  const { cabeOGasto } = await import('../src/core/cards.js');
+  assert.equal(cabeOGasto({ valorCents: 0, conta: { name: 'X', balanceCents: 0 } }).cabe, true);
 });

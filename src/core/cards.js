@@ -65,13 +65,22 @@ export function validarCartao(card, { accounts = [] } = {}) {
   const erros = [];
   if (!card?.name?.trim()) erros.push('o cartão precisa de um nome');
 
-  if (ehDebito(card)) {
-    // Débito sem conta é um cartão que debita do nada. A tela resolve isso
-    // criando a conta junto, mas a regra mora aqui para o núcleo não depender
-    // de ninguém ter lembrado de fazer isso.
-    if (!card.accountId) erros.push('cartão de débito precisa de uma conta');
+  // Débito e crédito precisam de conta, por motivos diferentes e igualmente
+  // concretos: o débito sai da conta na hora, e a fatura do crédito sai dela
+  // no vencimento.
+  //
+  // Hoje a projeção soma todas as contas num bolo só, então gravar a conta
+  // ainda não muda o número — muda o que o app SABE. Sem ela não há como um
+  // dia dizer "esta conta fica negativa no dia 27", que é a pergunta de quem
+  // tem o salário numa conta e a fatura noutra.
+  //
+  // A regra mora aqui, e não na tela, para não depender de alguém ter
+  // lembrado de repetir a checagem no formulário.
+  if (ehDebito(card) || ehCredito(card)) {
+    const oQue = ehDebito(card) ? 'de débito' : 'de crédito';
+    if (!card.accountId) erros.push(`cartão ${oQue} precisa de uma conta`);
     else if (!accounts.some((a) => a.id === card.accountId)) {
-      erros.push('a conta desse cartão de débito não existe mais');
+      erros.push(`a conta desse cartão ${oQue} não existe mais`);
     }
   }
 
@@ -91,6 +100,67 @@ export function validarCartao(card, { accounts = [] } = {}) {
 
   return erros;
 }
+
+/**
+ * Esse gasto cabe?
+ *
+ * Devolve `{ cabe, motivo, faltamCents }`. Não bloqueia nada sozinho — quem
+ * chama decide se recusa ou só avisa, porque estourar o limite acontece na
+ * vida real e o app não pode fingir que não aconteceu.
+ *
+ * O que ele evita é o app aceitar calado: hoje um gasto maior que o saldo
+ * entra sem uma palavra, e a pessoa só descobre dias depois, quando a
+ * projeção já está negativa e ela não lembra mais de onde veio.
+ */
+export function cabeOGasto({ valorCents, card = null, conta = null, vale = null }) {
+  const valor = Math.abs(valorCents || 0);
+  if (!valor) return { cabe: true };
+
+  if (card && ehBeneficio(card)) {
+    const saldo = vale?.saldoCents ?? 0;
+    if (valor > saldo) {
+      return {
+        cabe: false,
+        motivo: `O ${card.name} tem ${saldo > 0 ? 'só ' : ''}${reais(saldo)} de saldo.`,
+        faltamCents: valor - saldo,
+      };
+    }
+    return { cabe: true };
+  }
+
+  if (card && ehCredito(card)) {
+    // Limite zerado quer dizer "não informei", não "não tenho limite".
+    // Barrar quem não preencheu o limite seria punir por campo em branco.
+    if (!card.limitCents) return { cabe: true };
+    const livre = Math.max(0, card.availableCents ?? card.limitCents);
+    if (valor > livre) {
+      return {
+        cabe: false,
+        motivo: `O ${card.name} tem ${reais(livre)} de limite livre.`,
+        faltamCents: valor - livre,
+      };
+    }
+    return { cabe: true };
+  }
+
+  if (conta) {
+    const saldo = conta.balanceCents ?? 0;
+    if (valor > saldo) {
+      return {
+        cabe: false,
+        motivo: saldo > 0
+          ? `A ${conta.name} tem ${reais(saldo)}.`
+          : `A ${conta.name} está ${saldo < 0 ? 'negativa' : 'zerada'}.`,
+        faltamCents: valor - saldo,
+      };
+    }
+  }
+
+  return { cabe: true };
+}
+
+const reais = (cents) =>
+  `R$ ${(Math.abs(cents) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /**
  * O que sobrou no vale hoje.

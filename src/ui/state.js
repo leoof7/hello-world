@@ -68,8 +68,22 @@ export function derive(doc, todayISO = today()) {
   // nos cofrinhos conta: perguntar "quantos meses de reserva você tem?" e
   // ignorar o cofrinho chamado "Reserva de emergência" era responder zero
   // olhando para o dinheiro separado exatamente para isso.
+  //
+  // Mas nem todo cofrinho é colchão. O da viagem tem destino e data — contá-lo
+  // como reserva faria o app dizer "você aguenta seis meses sem renda" quando
+  // aguenta dois, e essa é a conta que decide se a pessoa pode largar um
+  // emprego ruim. Por isso a flag por cofrinho: patrimônio soma todos,
+  // reserva soma só os que a pessoa realmente resgataria num aperto.
+  //
+  // O padrão é contar (`!== false`): quem cadastrou antes da flag existir tinha
+  // o comportamento antigo, e mudar o número de meses de reserva de alguém sem
+  // ela ter mexido em nada seria o app se contradizendo sozinho.
   const emCofrinhosCents = sum((doc.goals || []).map((g) => Math.max(0, g.savedCents || 0)));
-  const reservaCents = guardadoCents + emCofrinhosCents;
+  const cofrinhosDeReservaCents = sum((doc.goals || [])
+    .filter((g) => g.contaReserva !== false)
+    .map((g) => Math.max(0, g.savedCents || 0)));
+  const cofrinhosComDestinoCents = emCofrinhosCents - cofrinhosDeReservaCents;
+  const reservaCents = guardadoCents + cofrinhosDeReservaCents;
   const investidoCents = sum(doc.accounts.filter((a) => a.type === 'investment').map((a) => a.balanceCents));
 
   // Fatura marcada como paga já saiu do bolso — não é mais saída futura,
@@ -317,6 +331,8 @@ export function derive(doc, todayISO = today()) {
     saldoCents,
     guardadoCents,
     emCofrinhosCents,
+    cofrinhosDeReservaCents,
+    cofrinhosComDestinoCents,
     reservaCents,
     investidoCents,
     eventos,

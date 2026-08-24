@@ -794,6 +794,54 @@ async function mostrarCard(page, seletor) {
     salvo.balanceCents === 1050000 && salvo.monthlyRate === 0.16 && salvo.minPaymentRate === 0.15,
     `R$ ${(salvo.balanceCents / 100).toFixed(2)}`);
 
+  // ---- o formulário de dívida pergunta só o que vale para o tipo
+  //
+  // Eram três campos abertos ao mesmo tempo — juro, mínimo em % e mínimo em
+  // reais — e num parcelamento já contratado nenhum dos três valia.
+
+  await page.click('[data-act="nova-divida"]');
+  await page.waitForSelector('.sheet #frm');
+
+  const visivel = (nome) => page.evaluate((n) => {
+    const el = document.querySelector(`.sheet [name="${n}"]`);
+    if (!el) return false;
+    const linha = el.closest('.field');
+    return !!(linha && linha.style.display !== 'none' && linha.offsetParent !== null);
+  }, nome);
+
+  ok('rotativo pergunta juro e mínimo, e não pergunta parcela',
+    (await visivel('taxa')) && (await visivel('minimoPct')) && !(await visivel('parcelaValor')));
+
+  ok('e não mostra os dois campos de mínimo ao mesmo tempo',
+    (await visivel('minimoPct')) !== (await visivel('minimoFixo')));
+
+  // trocar a unidade troca o campo, não abre outro
+  await page.click('.sheet [name="minimoComo"] ~ * [data-seg-value="fixo"], .sheet .seg [data-seg-value="fixo"]');
+  await page.waitForTimeout(120);
+  ok('escolher "valor fixo" troca o campo de % pelo de reais',
+    !(await visivel('minimoPct')) && (await visivel('minimoFixo')));
+
+  await page.selectOption('.sheet [name="kind"]', 'installment');
+  await page.waitForTimeout(150);
+  ok('parcelamento contratado esconde juro, mínimo e saldo',
+    !(await visivel('taxa')) && !(await visivel('minimoPct'))
+    && !(await visivel('minimoFixo')) && !(await visivel('saldo')));
+  ok('e pergunta parcela e quantas faltam, que é como a pessoa conhece a dívida',
+    (await visivel('parcelaValor')) && (await visivel('parcelasFaltam')));
+
+  await page.fill('.sheet [name="name"]', 'Geladeira');
+  await digitar('.sheet [name="parcelaValor"]', '20000');
+  await page.fill('.sheet [name="parcelasFaltam"]', '5');
+  await page.click('.sheet button[type="submit"]');
+  await page.waitForTimeout(700);
+  const parcelada = await page.evaluate(async () =>
+    (await import('./src/ui/app.js')).app.doc.debts.find((d) => d.name === 'Geladeira'));
+  ok('o saldo sai da multiplicação: 5 × R$ 200 são R$ 1.000',
+    parcelada?.balanceCents === 100000, `veio ${parcelada?.balanceCents}`);
+  ok('a parcela vira o mínimo do mês, e não sobra juro nem percentual',
+    parcelada?.minPaymentCents === 20000 && parcelada?.monthlyRate === 0 && parcelada?.minPaymentRate === 0,
+    JSON.stringify({ min: parcelada?.minPaymentCents, taxa: parcelada?.monthlyRate, pct: parcelada?.minPaymentRate }));
+
   // dia e parcelas fora da faixa ficam presos nela
   await page.evaluate(() => { location.hash = '#cartoes'; });
   await page.waitForTimeout(350);
@@ -804,11 +852,22 @@ async function mostrarCard(page, seletor) {
   await page.fill('.sheet [name="name"]', 'Teste');
   await page.fill('.sheet [name="closingDay"]', '99');
   await page.fill('.sheet [name="dueDay"]', '0');
+
+  // A fatura sai de alguma conta. O formulário nunca deixa isso em branco:
+  // já vem apontando para uma conta existente, e quem não tem nenhuma cai em
+  // "cadastrar agora" — sem essa ligação o app não sabe de onde o dinheiro sai
+  // no vencimento, e não consegue prever o dia em que ele falta.
+  const contaEscolhida = await page.inputValue('.sheet [name="accountId"]');
+  ok('cartão de crédito já nasce apontando para uma conta', !!contaEscolhida, contaEscolhida);
+
   await page.click('.sheet button[type="submit"]');
   await page.waitForTimeout(700);
-  const cartao = await page.evaluate(async () => (await import('./src/ui/app.js')).app.doc.cards[0]);
+  const cartao = await page.evaluate(async () =>
+    (await import('./src/ui/app.js')).app.doc.cards.find((c) => c.name === 'Teste'));
   ok('dia de fechamento fora do mês é preso na faixa',
     cartao.closingDay === 31 && cartao.dueDay === 1, `fecha ${cartao.closingDay}, vence ${cartao.dueDay}`);
+  ok('e a conta criada no mesmo formulário fica ligada ao cartão',
+    !!cartao.accountId, JSON.stringify(cartao.accountId));
 
   await page.evaluate(() => { location.hash = '#painel'; });
   await page.waitForTimeout(350);
@@ -817,7 +876,8 @@ async function mostrarCard(page, seletor) {
   await page.fill('.sheet [name="description"]', 'Sofá');
   await digitar('.sheet [name="valor"]', '120000');
   // Parcelas só existe pagando no crédito — escolhe o cartão pra ela aparecer.
-  await page.selectOption('.sheet [name="origem"]', { label: 'Teste — crédito' });
+  // O rótulo vem indentado porque o cartão agora mora embaixo da conta dele.
+  await page.selectOption('.sheet [name="origem"]', { label: '   ↳ Teste — crédito' });
   await page.fill('.sheet [name="count"]', '900');
   await page.click('.sheet button[type="submit"]');
   await page.waitForTimeout(900);

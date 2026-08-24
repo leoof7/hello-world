@@ -12,7 +12,7 @@ import { expand } from '../core/installments.js';
 import { diasDoRecorrente, mensalDoRecorrente } from '../core/projection.js';
 import { learn } from '../core/categorize.js';
 import { KIND as KIND_DIVIDA, validateDebt, ativa, somenteAtivas } from '../core/debts.js';
-import { KIND, TIPOS, validarCartao, permiteParcelar, ehBeneficio, ehDebito } from '../core/cards.js';
+import { KIND, TIPOS, validarCartao, permiteParcelar, ehBeneficio, ehDebito, cabeOGasto } from '../core/cards.js';
 import { podeComprar, custoDoHabito } from '../core/insights.js';
 import * as avisos from '../data/avisos.js';
 import { QUIZ } from '../core/perfil.js';
@@ -923,6 +923,22 @@ const ACOES = {
   async 'novo-cofrinho'() { await editarCofrinho(null); },
   async 'editar-cofrinho'({ id }) { await editarCofrinho(id); },
   async 'depositar-cofrinho'({ id }) { await depositarCofrinho(id); },
+
+  // Um toque decide se este cofrinho é colchão ou dinheiro com destino. Sem
+  // abrir formulário: é a mesma decisão que a pessoa muda de ideia sobre —
+  // hoje a viagem é intocável, mês que vem ela vira reserva.
+  async 'alternar-reserva'({ id }) {
+    const antes = (app.doc.goals || []).find((x) => x.id === id);
+    if (!antes) return;
+    const passaAContar = antes.contaReserva === false;
+    await commit((d) => {
+      const g = d.goals.find((x) => x.id === id);
+      if (g) g.contaReserva = passaAContar;
+    });
+    toast(passaAContar
+      ? `${antes.name} agora conta como reserva de emergência.`
+      : `${antes.name} saiu da reserva — continua no patrimônio.`);
+  },
   async 'novo-bem'() { await editarBem(null); },
   async 'editar-bem'({ id }) { await editarBem(id); },
 
@@ -1382,18 +1398,46 @@ async function editarLancamento(id, sugestao = {}) {
   // que ele debita — quem escolhe "Débito Itaú" quer que o dinheiro saia do
   // Itaú, não que apareça uma fatura. O vale aponta para ele mesmo, porque o
   // dinheiro é dele.
-  const opcoesOrigemSaida = () => [
-    ...app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: `${a.name} — conta` })),
-    ...app.doc.cards.flatMap((c) => {
-      if (ehBeneficio(c)) return [{ value: `cd:${c.id}`, label: `${c.name} — vale` }];
-      if (ehDebito(c)) return c.accountId ? [{ value: `ac:${c.accountId}`, label: `${c.name} — débito` }] : [];
-      return [
-        { value: `cd:${c.id}`, label: `${c.name} — crédito` },
-        ...(c.accountId ? [{ value: `ac:${c.accountId}`, label: `${c.name} — débito` }] : []),
-      ];
-    }),
-    ...app.doc.goals.filter((g) => g.status !== 'pausado').map((g) => ({ value: `cf:${g.id}`, label: `${g.name} — depósito` })),
-  ];
+  /**
+   * A lista de origem, agrupada por conta.
+   *
+   * Antes a conta aparecia solta e os cartões dela em outro ponto da lista,
+   * como se fossem dinheiros diferentes. São o mesmo: o débito sai da conta na
+   * hora, e a fatura do crédito sai dela no vencimento. Ver "XP" no começo e
+   * "XP — crédito" seis linhas abaixo faz a pessoa escolher errado.
+   *
+   * Agora cada conta traz os cartões dela logo em seguida, indentados. Os
+   * vales vêm por último, separados — o dinheiro deles não é da conta.
+   */
+  const opcoesOrigemSaida = () => {
+    const opcoes = [];
+
+    for (const a of app.doc.accounts.filter((x) => x.type !== 'investment')) {
+      opcoes.push({ value: `ac:${a.id}`, label: `${a.name} — conta` });
+      for (const c of app.doc.cards.filter((x) => x.accountId === a.id)) {
+        if (ehBeneficio(c)) continue;
+        opcoes.push(ehDebito(c)
+          ? { value: `ac:${a.id}|cd:${c.id}`, label: `   ↳ ${c.name} — débito` }
+          : { value: `cd:${c.id}`, label: `   ↳ ${c.name} — crédito` });
+      }
+    }
+
+    // Cartão sem conta não deveria existir — a validação barra —, mas se algum
+    // sobrou de antes da regra, ele aparece aqui em vez de sumir da lista.
+    for (const c of app.doc.cards.filter((x) => !x.accountId && !ehBeneficio(x))) {
+      opcoes.push({ value: `cd:${c.id}`, label: `${c.name} — ${ehDebito(c) ? 'débito' : 'crédito'} (sem conta)` });
+    }
+
+    for (const c of app.doc.cards.filter(ehBeneficio)) {
+      opcoes.push({ value: `cd:${c.id}`, label: `${c.name} — vale` });
+    }
+
+    for (const g of app.doc.goals.filter((x) => x.status !== 'pausado')) {
+      opcoes.push({ value: `cf:${g.id}`, label: `${g.name} — depósito` });
+    }
+
+    return opcoes;
+  };
   const opcoesOrigemEntrada = () => app.doc.accounts.map((a) => ({ value: `ac:${a.id}`, label: a.name }));
 
   const entradaInicial = sugestao.entrada ?? (tx ? tx.amountCents > 0 : false);
@@ -1468,7 +1512,13 @@ async function editarLancamento(id, sugestao = {}) {
   }
 
   const entradaFinal = r.entrada === 'entrada';
-  const [tipo, origemId] = r.origem.split(':');
+
+  // A origem pode vir composta: "ac:conta|cd:cartão" é o débito, que sai da
+  // conta E é do cartão. Guardar os dois é o que permite depois responder
+  // "quanto passei no débito do Itaú" sem perder de qual conta saiu.
+  const partesOrigem = String(r.origem).split('|');
+  const [tipo, origemId] = partesOrigem[0].split(':');
+  const [tipo2, origemId2] = partesOrigem[1] ? partesOrigem[1].split(':') : [];
 
   // Depósito em cofrinho não é gasto categorizado — só move pro guardado,
   // igual ao botão "Depositar" de dentro do cofrinho.
@@ -1484,8 +1534,32 @@ async function editarLancamento(id, sugestao = {}) {
     return;
   }
 
-  const cardId = tipo === 'cd' ? origemId : null;
+  const cardId = tipo === 'cd' ? origemId : (tipo2 === 'cd' ? origemId2 : null);
   const accountId = tipo === 'ac' ? origemId : null;
+
+  // Saída que não cabe: avisa e deixa decidir.
+  //
+  // Bloquear seria errado — estourar o limite e ficar no vermelho acontecem
+  // na vida real, e um app que se recusa a registrar isso vira um app que
+  // mente por omissão. O que não pode é aceitar CALADO: hoje um gasto maior
+  // que o saldo entra sem uma palavra, e a pessoa só descobre dias depois,
+  // com a projeção já negativa e sem lembrar de onde veio.
+  if (!entradaFinal && !id) {
+    const cartao = cardId ? app.view.todosCartoes.find((c) => c.id === cardId) : null;
+    const conta = accountId ? app.doc.accounts.find((a) => a.id === accountId) : null;
+    const vale = cartao ? app.view.vales.find((x) => x.cardId === cartao.id) : null;
+    const veredito = cabeOGasto({ valorCents: r.valor, card: cartao, conta, vale });
+
+    if (!veredito.cabe) {
+      const seguir = await confirmar({
+        titulo: 'Esse valor não cabe',
+        texto: `${veredito.motivo} Faltam ${brl(veredito.faltamCents)}. `
+          + 'Se foi assim mesmo, registre — o app precisa saber para a projeção ficar honesta.',
+        ok: 'Registrar assim mesmo',
+      });
+      if (!seguir) return;
+    }
+  }
   const sinal = entradaFinal ? 1 : -1;
 
   // Só barra em lançamento novo: editar um já existente compara valor novo
@@ -1718,6 +1792,18 @@ async function formularioDoCartao(c, kind, id) {
       { name: 'closingDay', label: 'Fecha dia', type: 'number', value: c?.closingDay || 20, min: 1, max: 31 },
       { name: 'dueDay', label: 'Vence dia', type: 'number', value: c?.dueDay || 27, min: 1, max: 31 },
       { name: 'limite', label: 'Limite', type: 'money', value: c?.limitCents || 0 },
+      // Crédito também precisa de conta: a fatura vence e o dinheiro sai de
+      // algum lugar. Sem isso a projeção sabia QUANTO ia sair e não de ONDE —
+      // e com duas contas cadastradas ela descontava do bolo, não da conta
+      // certa. Quem tem o salário numa e a fatura noutra via um saldo que não
+      // existe em nenhuma das duas.
+      { name: 'accountId', label: 'A fatura é paga de qual conta', type: 'select',
+        value: c?.accountId || (semConta ? '__nova' : contas[0]?.id || '__nova'),
+        options: [...contas.map((a) => ({ value: a.id, label: a.name })), { value: '__nova', label: '+ Cadastrar uma conta agora' }],
+        hint: 'no vencimento é dessa conta que o valor sai' },
+      { name: 'contaNome', label: 'Nome da conta nova', type: 'text', value: '', placeholder: 'Itaú' },
+      { name: 'contaSaldo', label: 'Quanto tem nessa conta hoje', type: 'money', value: 0,
+        hint: 'pode deixar zerado e ajustar depois' },
     );
   }
 
@@ -1755,7 +1841,8 @@ async function formularioDoCartao(c, kind, id) {
       ok: 'Salvar',
       apagar: c ? 'Apagar cartão' : null,
       aoMontar: (card) => {
-        if (kind !== KIND.DEBIT) return;
+        // Crédito e débito precisam dos mesmos campos de conta.
+        if (kind === KIND.BENEFIT) return;
         const conta = card.querySelector('[name="accountId"]');
         const linhas = ['contaNome', 'contaSaldo']
           .map((n) => card.querySelector(`[name="${n}"]`).closest('.field'));
@@ -1789,9 +1876,9 @@ async function formularioDoCartao(c, kind, id) {
 
   // Conta nova criada aqui dentro: quem está cadastrando um cartão de débito
   // não deveria ser mandado para outra tela e trazido de volta.
-  let contaId = kind === KIND.DEBIT ? r.accountId : null;
+  let contaId = kind === KIND.BENEFIT ? null : r.accountId;
   let contaNova = null;
-  if (kind === KIND.DEBIT && contaId === '__nova') {
+  if (kind !== KIND.BENEFIT && contaId === '__nova') {
     contaNova = {
       id: novoId('ac'),
       name: r.contaNome?.trim() || r.name?.trim() || 'Conta',
@@ -1886,15 +1973,25 @@ const pctParaFracao = (v) => {
  * como 3650% do saldo.
  */
 function conferirDivida(r) {
+  // A conferência olha os mesmos campos que o salvamento vai usar. Validar o
+  // percentual de uma dívida parcelada — onde o campo nem aparece — recusaria
+  // o formulário por um número que a pessoa não digitou.
+  const ehParcelado = !r.acordo && r.kind === KIND_DIVIDA.INSTALLMENT;
+  const parcela = Math.abs(r.parcelaValor || 0);
+  const faltam = Math.max(1, Number(r.parcelasFaltam) || 1);
+  const usaFixo = r.minimoComo === 'fixo';
+
+  if (ehParcelado && !parcela) return 'Falta o valor da parcela — é ele que vira o mínimo do mês e entra na projeção.';
+
   const motivo = validateDebt({
-    balanceCents: Math.abs(r.saldo || 0),
-    monthlyRate: r.kind === KIND_DIVIDA.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
-    minPaymentRate: pctParaFracao(r.minimoPct),
-    minPaymentCents: r.minimoFixo,
+    balanceCents: ehParcelado ? parcela * faltam : Math.abs(r.saldo || 0),
+    monthlyRate: ehParcelado ? 0 : pctParaFracao(r.taxa),
+    minPaymentRate: ehParcelado || usaFixo ? 0 : pctParaFracao(r.minimoPct),
+    minPaymentCents: ehParcelado ? parcela : (usaFixo ? Math.abs(r.minimoFixo || 0) : 0),
   });
 
   return {
-    'minimo-acima-de-100': `${r.minimoPct}% do saldo não existe — o máximo é 100. Se ${r.minimoPct} é um valor em reais, apague daqui e use o campo de baixo.`,
+    'minimo-acima-de-100': `${r.minimoPct}% do saldo não existe — o máximo é 100. Se o seu mínimo é um valor em reais, troque a unidade para "valor fixo".`,
     'juros-acima-de-100': `${r.taxa}% ao mês custaria mais que a dívida inteira todo mês. Rotativo fica perto de 15.`,
     'minimo-maior-que-saldo': 'O mínimo fixo ficou maior que o saldo devedor. Confira os dois valores.',
   }[motivo] || null;
@@ -1917,6 +2014,13 @@ async function editarDivida(id) {
     taxa: d0 ? String((d0.monthlyRate * 100).toFixed(2)).replace('.', ',') : '',
     minimoPct: d0?.minPaymentRate ? String((d0.minPaymentRate * 100).toFixed(0)) : '',
     minimoFixo: d0?.minPaymentCents || 0,
+    // Uma dívida salva com % tinha minPaymentRate; com valor fixo, só
+    // minPaymentCents. É daí que sai qual unidade mostrar ao reabrir.
+    minimoComo: d0 && !d0.minPaymentRate && d0.minPaymentCents ? 'fixo' : 'pct',
+    parcelaValor: d0?.minPaymentCents || 0,
+    parcelasFaltam: d0?.minPaymentCents
+      ? Math.max(1, Math.round(Math.abs(d0.balanceCents || 0) / d0.minPaymentCents))
+      : 1,
     dueDay: d0?.dueDay || 10,
     cardId: d0?.cardId || '',
     bloqueado: !!d0?.cardBlocked,
@@ -1947,9 +2051,23 @@ async function editarDivida(id) {
         { name: 'saldo', label: 'Quanto deve hoje', type: 'money', value: atual.saldo },
         { name: 'taxa', label: 'Juros ao mês (%)', type: 'percent', value: atual.taxa,
           hint: 'só o número. Rotativo costuma ficar entre 12 e 16; cheque especial no teto de 8' },
-        { name: 'minimoPct', label: 'Mínimo: quantos POR CENTO do saldo', type: 'percent', value: atual.minimoPct,
-          hint: 'só o número, sem R$. Cartão costuma exigir 15. Se o seu mínimo é um valor fixo em reais, deixe vazio e use o campo abaixo' },
-        { name: 'minimoFixo', label: 'Ou mínimo fixo por mês, em reais', type: 'money', value: atual.minimoFixo },
+        // Antes eram três campos abertos ao mesmo tempo — juro, mínimo em % e
+        // mínimo em reais — e a pessoa tinha que descobrir sozinha quais valiam
+        // para o caso dela. Num parcelamento já contratado nenhum dos três
+        // valia: não corre juro novo e o "mínimo" é a parcela inteira.
+        //
+        // Agora o tipo escolhe a pergunta. O segmento troca a UNIDADE do
+        // mínimo em vez de oferecer dois campos e deixar em branco o que não
+        // se usa: mínimo é um número só, com % ou R$ como unidade.
+        { name: 'minimoComo', label: 'O mínimo do mês é', type: 'segmento', value: atual.minimoComo,
+          options: [{ value: 'pct', label: '% do saldo' }, { value: 'fixo', label: 'valor fixo' }] },
+        { name: 'minimoPct', label: 'Quantos por cento do saldo', type: 'percent', value: atual.minimoPct,
+          hint: 'só o número. Cartão costuma exigir 15' },
+        { name: 'minimoFixo', label: 'Mínimo por mês, em reais', type: 'money', value: atual.minimoFixo },
+        { name: 'parcelaValor', label: 'Valor da parcela', type: 'money', value: atual.parcelaValor,
+          hint: 'a parcela que sai todo mês. É ela que entra na projeção de caixa e na fatura' },
+        { name: 'parcelasFaltam', label: 'Parcelas que ainda faltam', type: 'number', value: atual.parcelasFaltam, min: 1, max: 120,
+          hint: 'o saldo devedor é a parcela vezes o que falta — o app calcula sozinho' },
         { name: 'dueDay', label: 'Vence todo dia', type: 'number', value: atual.dueDay, min: 1, max: 28,
           hint: 'o dia em que a parcela sai da conta. É isto que a projeção de caixa usa' },
         { name: 'acordo', label: 'Já negociei um acordo pra essa dívida', type: 'checkbox', value: atual.acordo },
@@ -1962,32 +2080,45 @@ async function editarDivida(id) {
         apagar: d0 ? 'Quitei esta dívida' : null,
         aoMontar: (card) => {
           const cardIdSel = card.querySelector('[name="cardId"]');
-          const linhaBloqueado = card.querySelector('[name="bloqueado"]').closest('.field');
           const acordoChk = card.querySelector('[name="acordo"]');
-          const linhaSaldo = card.querySelector('[name="saldo"]').closest('.field');
-          const linhaTaxa = card.querySelector('[name="taxa"]').closest('.field');
-          const linhaMinPct = card.querySelector('[name="minimoPct"]').closest('.field');
-          const linhaMinFixo = card.querySelector('[name="minimoFixo"]').closest('.field');
-          const linhaForma = card.querySelector('[name="acordoForma"]').closest('.field');
-          const linhaValor = card.querySelector('[name="acordoValor"]').closest('.field');
-          const linhaParcelas = card.querySelector('[name="acordoParcelas"]').closest('.field');
+          const tipoSel = card.querySelector('[name="kind"]');
+          const linha = (nome) => card.querySelector(`[name="${nome}"]`).closest('.field');
+          const mostrar = (nome, sim) => { linha(nome).style.display = sim ? '' : 'none'; };
 
           const atualizar = () => {
-            linhaBloqueado.style.display = cardIdSel.value ? '' : 'none';
             const fezAcordo = acordoChk.checked;
-            linhaSaldo.style.display = fezAcordo ? 'none' : '';
-            linhaTaxa.style.display = fezAcordo ? 'none' : '';
-            linhaMinPct.style.display = fezAcordo ? 'none' : '';
-            linhaMinFixo.style.display = fezAcordo ? 'none' : '';
-            linhaForma.style.display = fezAcordo ? '' : 'none';
-            linhaValor.style.display = fezAcordo ? '' : 'none';
+            const tipo = tipoSel.value;
+            // Parcelamento contratado não corre juro novo e não tem "mínimo":
+            // tem parcela. Perguntar em parcela × quantas faltam é como a
+            // pessoa conhece a dívida — "faltam 5 de R$ 200" — e o saldo sai
+            // da multiplicação, sem ela ter que calcular nada.
+            const ehParcelado = tipo === KIND_DIVIDA.INSTALLMENT;
+            const como = card.querySelector('[name="minimoComo"]')?.value;
+
+            mostrar('bloqueado', !!cardIdSel.value);
+            mostrar('saldo', !fezAcordo && !ehParcelado);
+            mostrar('taxa', !fezAcordo && !ehParcelado);
+            mostrar('minimoComo', !fezAcordo && !ehParcelado);
+            mostrar('minimoPct', !fezAcordo && !ehParcelado && como === 'pct');
+            mostrar('minimoFixo', !fezAcordo && !ehParcelado && como === 'fixo');
+            mostrar('parcelaValor', !fezAcordo && ehParcelado);
+            mostrar('parcelasFaltam', !fezAcordo && ehParcelado);
+
+            mostrar('acordoForma', fezAcordo);
+            mostrar('acordoValor', fezAcordo);
             const formaSel = card.querySelector('[name="acordoForma"]')?.value;
-            linhaParcelas.style.display = fezAcordo && formaSel === 'parcelado' ? '' : 'none';
+            mostrar('acordoParcelas', fezAcordo && formaSel === 'parcelado');
           };
 
           cardIdSel.addEventListener('change', atualizar);
           acordoChk.addEventListener('change', atualizar);
+          tipoSel.addEventListener('change', atualizar);
           card.querySelector('[name="acordoForma"]').addEventListener('change', atualizar);
+          // O segmento é botão, não <select>: sem o click o painel só reagia
+          // depois que outro campo mudasse, e trocar % por R$ parecia quebrado.
+          card.querySelector('[name="minimoComo"]')?.closest('.field')
+            ?.addEventListener('click', () => setTimeout(atualizar, 0));
+          card.querySelector('[name="minimoComo"]')?.addEventListener('change', atualizar);
           atualizar();
         },
       });
@@ -2006,14 +2137,24 @@ async function editarDivida(id) {
 
     const fezAcordo = r.acordo;
     const parcelasAcordo = r.acordoForma === 'avista' ? 1 : Math.max(1, r.acordoParcelas);
+    // Parcelamento contratado: o saldo é a parcela vezes o que falta, e a
+    // parcela É o mínimo do mês. Não há taxa nem percentual a guardar.
+    const ehParcelado = !fezAcordo && r.kind === KIND_DIVIDA.INSTALLMENT;
+    const parcela = Math.abs(r.parcelaValor || 0);
+    const faltam = Math.max(1, Number(r.parcelasFaltam) || 1);
     const registro = {
       id: id || novoId('dv'),
       name: r.name || 'Dívida',
       kind: fezAcordo ? KIND_DIVIDA.INSTALLMENT : r.kind,
-      balanceCents: fezAcordo ? Math.abs(r.acordoValor) : Math.abs(r.saldo),
-      monthlyRate: fezAcordo || r.kind === KIND_DIVIDA.INSTALLMENT ? 0 : pctParaFracao(r.taxa),
-      minPaymentRate: fezAcordo ? 0 : pctParaFracao(r.minimoPct),
-      minPaymentCents: fezAcordo ? Math.round(Math.abs(r.acordoValor) / parcelasAcordo) : r.minimoFixo,
+      balanceCents: fezAcordo ? Math.abs(r.acordoValor)
+        : ehParcelado ? parcela * faltam : Math.abs(r.saldo),
+      monthlyRate: fezAcordo || ehParcelado ? 0 : pctParaFracao(r.taxa),
+      // Guardar as duas unidades ao mesmo tempo faria o mínimo virar o MAIOR
+      // dos dois em minimumOf() — a pessoa escolhe uma, a outra zera.
+      minPaymentRate: fezAcordo || ehParcelado || r.minimoComo === 'fixo' ? 0 : pctParaFracao(r.minimoPct),
+      minPaymentCents: fezAcordo ? Math.round(Math.abs(r.acordoValor) / parcelasAcordo)
+        : ehParcelado ? parcela
+          : r.minimoComo === 'fixo' ? Math.abs(r.minimoFixo || 0) : 0,
       dueDay: Math.min(28, Math.max(1, Number(r.dueDay) || 10)),
       cardId: r.cardId || null,
       cardBlocked: r.cardId ? !!r.bloqueado : false,
@@ -2071,6 +2212,12 @@ async function editarCofrinho(id) {
       hint: 'se o dinheiro está num lugar que rende, a meta chega antes. Só o número, ao MÊS' },
     { name: 'prazo', label: 'Prazo (opcional)', type: 'date', value: g?.deadline || '' },
     { name: 'pausado', label: 'Pausado', type: 'checkbox', value: g?.status === 'pausado' },
+    // O cofrinho é dinheiro seu, mas nem todo cofrinho é reserva. O da viagem
+    // não te salva de um imprevisto — contá-lo como colchão faria o app dizer
+    // que você aguenta seis meses sem renda quando aguenta dois.
+    { name: 'contaReserva', label: 'Contar como reserva de emergência', type: 'checkbox',
+      value: g ? g.contaReserva !== false : true,
+      hint: 'desmarque para cofrinhos com destino certo — viagem, casamento. Eles continuam no patrimônio, só não contam como colchão' },
     { name: 'porCategoria', label: 'Também acompanhar por categoria de gasto (opcional)', type: 'checkbox', value: jaTemCategoria,
       hint: 'pra "quanto o carro me custa" — soma o que você já gasta nessas categorias, além do que guarda aqui' },
     ...categorias.map((c) => ({ name: `cat_${c.id}`, label: c.name, type: 'checkbox', value: g?.categoryIds?.includes(c.id) || false })),
@@ -2103,6 +2250,7 @@ async function editarCofrinho(id) {
     status: r.pausado ? 'pausado' : 'ativo',
     deadline: r.prazo || null,
     categoryIds: r.porCategoria ? categorias.filter((c) => r[`cat_${c.id}`]).map((c) => c.id) : [],
+    contaReserva: !!r.contaReserva,
     kind: g?.kind,
   };
   await commit((d) => {

@@ -6,7 +6,7 @@
 
 import { brl, brlShort, formatCents, percent, sum } from '../core/money.js';
 import { formatShort, formatLong, formatMonthKey, monthAbbr, addMonthKey, parts, daysBetween } from '../core/dates.js';
-import { KIND, horizon, comparePlans } from '../core/debts.js';
+import { KIND, horizon, comparePlans, minimumOf as minimoDaDivida } from '../core/debts.js';
 import { monthsToGoal, monthlyYield } from '../core/goals.js';
 import { avisosLigados } from '../data/avisos.js';
 import { CORES } from './tema.js';
@@ -23,7 +23,11 @@ import { wire } from './actions.js';
 const TABS = [
   ['painel', 'casa', 'Painel'],
   ['cartoes', 'cartao', 'Finanças'],
-  ['investimentos', 'cofre', 'Investimentos'],
+  // Dívidas virou aba porque era a tela mais visitada morando dentro de Tudo,
+  // a dois toques de distância. Investimentos foi para Tudo no lugar dela:
+  // quem ainda paga rotativo abre Dívidas todo dia e Investimentos uma vez
+  // por mês, e o menu tem que refletir o que a pessoa faz, não o organograma.
+  ['dividas', 'escudo', 'Dívidas'],
   ['analise', 'grafico', 'Saúde'],
   ['tudo', 'menu', 'Tudo'],
 ];
@@ -263,7 +267,7 @@ function faixaExemplo(app) {
 }
 
 function tabbar(atual) {
-  const pai = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel', dividas: 'tudo' }[atual] || atual;
+  const pai = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel', investimentos: 'tudo' }[atual] || atual;
   return `<nav class="tabbar"><div class="in">
     ${TABS.map(([id, ic, label]) => `
       <button class="tab ${pai === id ? 'on' : ''}" data-go="${id}" aria-current="${pai === id ? 'page' : 'false'}">
@@ -1085,7 +1089,55 @@ function faturas(app) {
   <div class="sec">
     <div class="sh"><h3>Por cartão</h3></div>
     ${v.cartoes.map((c) => faturaCartao(c, v)).join('')}
-  </div>`;
+  </div>
+
+  ${parcelasDoMes(v)}`;
+}
+
+/**
+ * O que mais vence este mês além da fatura.
+ *
+ * A tela se chamava "Faturas" e mostrava só cartão, mas a pergunta de quem
+ * abre ela é "quanto eu pago este mês" — e a resposta inclui as parcelas
+ * contratadas e o mínimo de cada dívida ativa. Ver R$ 150 aqui e descobrir os
+ * outros R$ 2.680 em duas telas diferentes é como alguém se surpreende com o
+ * próprio mês.
+ *
+ * Dívida pausada não entra: ela não entra em conta nenhuma.
+ */
+function parcelasDoMes(v) {
+  const compras = v.compras.filter((c) => c.monthlyCents > 0);
+  const dividas = v.dividas.filter((d) => minimoDaDivida(d) > 0);
+  if (!compras.length && !dividas.length) return '';
+
+  return `
+  ${compras.length ? `
+  <div class="sec">
+    <div class="sh"><h3>Parcelas do mês</h3><a>${m(v.parcelasDoMesCents, brlShort)}</a></div>
+    <div class="list">${compras.map((c) => `
+      <button class="row" data-go="cartoes">
+        <div class="ic a">${icon('lista')}</div>
+        <div class="bd"><div class="t">${esc(c.description || 'Compra parcelada')}</div>
+          <div class="s">${pilulasDaLinha([`${c.current}/${c.of}`, `falta ${m(c.remainingCents, brlShort)}`])}</div></div>
+        <div class="rt"><div class="amt num">${m(c.monthlyCents)}</div><div class="dt">por mês</div></div>
+      </button>`).join('')}</div>
+  </div>` : ''}
+
+  ${dividas.length ? `
+  <div class="sec">
+    <div class="sh"><h3>Mínimos de dívida</h3><a>${m(v.minimosCents, brlShort)}</a></div>
+    <div class="list">${dividas.map((d) => `
+      <button class="row" data-go="dividas">
+        <div class="ic r">${icon('escudo')}</div>
+        <div class="bd"><div class="t">${esc(d.name)}</div>
+          <div class="s">${pilulasDaLinha([
+            `vence dia ${d.dueDay || 10}`,
+            d.monthlyRate ? `${percent(d.monthlyRate, 1)}/mês` : null,
+          ])}</div></div>
+        <div class="rt"><div class="amt num" style="color:var(--negativo)">${m(minimoDaDivida(d))}</div>
+          <div class="dt">mínimo</div></div>
+      </button>`).join('')}</div>
+  </div>` : ''}`;
 }
 
 /** Barras do muro de parcelas — 12 meses, altura proporcional. */
@@ -1425,6 +1477,15 @@ function dividaCard(d, i, plano, v) {
   const quitacao = plano?.payoffByDebt?.find((p) => p.id === d.id)?.month;
   const anual = d.monthlyRate ? Math.pow(1 + d.monthlyRate, 12) - 1 : 0;
 
+  // Parcelamento contratado não corre juro novo. Mostrar "0,0% AO MÊS · 0% AO
+  // ANO" e "custa parada R$ 0,00/dia" é ocupar as duas linhas mais visíveis do
+  // card com zeros. O que a pessoa quer saber é quanto falta: a parcela e
+  // quantas ainda vêm.
+  const semJuro = d.kind === KIND.INSTALLMENT || !d.monthlyRate;
+  const parcelasFaltam = d.minPaymentCents
+    ? Math.max(1, Math.round(Math.abs(d.balanceCents) / Math.abs(d.minPaymentCents)))
+    : 0;
+
   // Dado já guardado antes de o app passar a barrar valores impossíveis. O
   // cálculo não usa mais esse número solto, mas quem cadastrou precisa saber
   // que ele está errado — em vez de o app fingir que está tudo certo.
@@ -1436,8 +1497,10 @@ function dividaCard(d, i, plano, v) {
     <div class="top">
       <div>
         <div class="nm">${i === 0 ? '1º alvo · ' : ''}${esc(d.name)}</div>
-        <div class="rate" style="color:${d.monthlyRate >= 0.1 ? 'var(--red)' : 'var(--amber)'}">
-          ${esc(nome)} · ${percent(d.monthlyRate || 0, 1)} AO MÊS · ${percent(anual, 0)} AO ANO
+        <div class="rate" style="color:${semJuro ? 'var(--muted)' : d.monthlyRate >= 0.1 ? 'var(--red)' : 'var(--amber)'}">
+          ${semJuro
+            ? `${esc(nome)} · ${parcelasFaltam ? `FALTAM ${parcelasFaltam}` : 'SEM JURO NOVO'}`
+            : `${esc(nome)} · ${percent(d.monthlyRate || 0, 1)} AO MÊS · ${percent(anual, 0)} AO ANO`}
         </div>
       </div>
       <button class="ib" data-act="editar-divida" data-id="${esc(d.id)}" aria-label="Editar dívida">${icon('engrenagem')}</button>
@@ -1446,8 +1509,12 @@ function dividaCard(d, i, plano, v) {
       <span style="font-size:11px;color:var(--muted)">Saldo</span>
       <b class="num" style="font-size:17px">${mE('dividas-lista', Math.abs(d.balanceCents))}</b>
     </div>
-    <div class="ft"><span style="font-size:11px;color:var(--muted)">Custa parada</span>
-      <span class="num" style="font-size:12px;color:var(--red)">${mE('dividas-lista', Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>
+    ${semJuro
+      ? `<div class="ft"><span style="font-size:11px;color:var(--muted)">Parcela</span>
+          <span class="num" style="font-size:12px">${mE('dividas-lista', Math.abs(d.minPaymentCents || 0))}${
+            parcelasFaltam ? ` × ${parcelasFaltam}` : ''}</span></div>`
+      : `<div class="ft"><span style="font-size:11px;color:var(--muted)">Custa parada</span>
+          <span class="num" style="font-size:12px;color:var(--red)">${mE('dividas-lista', Math.round(Math.abs(d.balanceCents) * (d.monthlyRate || 0) / 30))}/dia</span></div>`}
     ${quitacao ? `<div class="ft"><span style="font-size:11px;color:var(--muted)">Quita em</span>
       <span class="num" style="font-size:12px;color:var(--positivo)">${formatMonthKey(quitacao)}</span></div>` : ''}
     ${d.agreement || d.cardBlocked ? `<div class="legend" style="margin-top:8px">
@@ -1895,7 +1962,8 @@ function tudo(app) {
     <div class="sh"><h3>Dinheiro</h3></div>
     <div class="list">
       ${item('go:recebimentos', 'dinheiro', 'Recebimentos', `fixo ${m(v.rendaFixaCents, brlShort)} · avulsos ${m(v.extrasMesCents, brlShort)} este mês`, 'j')}
-      ${item('go:dividas', 'escudoOk', 'Dívidas', v.dividaTotalCents > 0 ? `${m(v.dividaTotalCents, brlShort)} · ordem certa de pagar` : 'nenhuma cadastrada', v.dividaTotalCents > 0 ? 'r' : '')}
+      ${item('go:investimentos', 'cofre', 'Investimentos e patrimônio',
+        `${m(v.investidoCents + v.reservaCents, brlShort)} guardado · cofrinhos, metas e bens`, 'j')}
       ${item('fixos', 'relogio', 'Gastos fixos', `${app.doc.recurring.filter((r) => r.kind === 'expense').length} contas · ${m(v.fixosCents, brlShort)} por mês`)}
       ${item('tetos', 'grafico', 'Tetos por categoria', `${Object.keys(app.doc.budgets || {}).length} categorias com limite`)}
       ${item('patrimonio', 'banco', 'Atualizar saldos', 'copia o saldo de cada banco pra manter a projeção honesta')}
@@ -1961,9 +2029,12 @@ function cofrinhos(app) {
   ${header(app, { voltar: 'tudo' })}
 
   <div class="hero">
-    <div class="top"><span class="lbl">Guardado ao todo</span>${botaoOlho("cofrinhos-total")}</div>
-    <div class="big ser">${olho(app, "cofrinhos-total", m(v.guardadoCents, brlShort))}</div>
+    <div class="top"><span class="lbl">Guardado nos cofrinhos</span>${botaoOlho("cofrinhos-total")}</div>
+    <div class="big ser">${olho(app, "cofrinhos-total", m(v.emCofrinhosCents, brlShort))}</div>
     <div class="foot"><span class="acc">${ativos.length} ativo${ativos.length === 1 ? '' : 's'} · ${m(mensal, brlShort)} por mês</span></div>
+    ${v.cofrinhosComDestinoCents > 0 ? `<div class="foot" style="margin-top:4px"><span class="acc" style="opacity:.75">${
+      olho(app, 'cofrinhos-total', m(v.cofrinhosDeReservaCents, brlShort))} conta como reserva · ${
+      olho(app, 'cofrinhos-total', m(v.cofrinhosComDestinoCents, brlShort))} tem destino certo</span></div>` : ''}
   </div>
 
   ${v.dividaTotalCents > 0 ? `
@@ -1994,6 +2065,7 @@ function cofrinho(g, app) {
   });
   const rendeMes = monthlyYield(g.savedCents, g.monthlyRate || 0);
   const temCategoria = (g.categoryIds || []).length > 0;
+  const contaReserva = g.contaReserva !== false;
   const custoCategoria = temCategoria ? sum(
     app.doc.transactions.filter((t) => t.amountCents < 0 && g.categoryIds.includes(t.categoryId)).map((t) => Math.abs(t.amountCents))
   ) : 0;
@@ -2016,6 +2088,13 @@ function cofrinho(g, app) {
       <span style="font-size:10.5px;color:var(--positivo)">+${m(rendeMes, brlShort)}/mês</span></div>` : ''}
     ${temCategoria ? `<div class="ft"><span style="font-size:10.5px;color:var(--muted)">gasto nas categorias ligadas</span>
       <span style="font-size:10.5px;color:var(--muted)">${m(custoCategoria, brlShort)}</span></div>` : ''}
+    <div class="ft" style="margin-top:6px">
+      <span style="font-size:10.5px;color:var(--muted)">${contaReserva
+        ? 'conta como reserva de emergência'
+        : 'guardado com destino — fora da reserva'}</span>
+      <button class="lnk" data-act="alternar-reserva" data-id="${esc(g.id)}"
+        style="font-size:10.5px">${contaReserva ? 'tirar da reserva' : 'contar na reserva'}</button>
+    </div>
     <button class="btn ghost" data-act="depositar-cofrinho" data-id="${esc(g.id)}" style="width:100%;margin-top:10px;padding:9px">${icon('mais')} Depositar</button>
   </div>`;
 }

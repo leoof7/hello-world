@@ -41,7 +41,9 @@ export const app = {
 };
 
 const TELAS = ['painel', 'cartoes', 'dividas', 'analise', 'tudo', 'cofrinhos', 'recebimentos', 'revisao', 'guia', 'faturas', 'investimentos'];
-const PAI = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel', dividas: 'tudo' };
+// Qual aba fica acesa quando a tela aberta não é uma aba. Dívidas saiu daqui
+// ao virar aba própria; Investimentos entrou, porque agora mora dentro de Tudo.
+const PAI = { cofrinhos: 'tudo', recebimentos: 'tudo', guia: 'tudo', revisao: 'painel', faturas: 'painel', investimentos: 'tudo' };
 
 // ------------------------------------------------------------------ persistir
 
@@ -239,6 +241,10 @@ function pedirSenha({ criando = false } = {}) {
 
 /** Cofre já existe: destrava. */
 async function destravar(meta) {
+  // A partir daqui a pessoa está no meio do desbloqueio — senha na tela, Face
+  // ID aberto ou chave sendo derivada. Uma versão nova que chegue agora espera
+  // a vez em vez de recarregar por cima. Ver cuidarDaVersao().
+  app.mexendoNoCofre = true;
   const salt = b64ToBytes(meta.salt);
 
   if (meta.unlockMethod === 'passkey' && meta.credentialId) {
@@ -618,10 +624,20 @@ async function cuidarDaVersao() {
   // e o app se reinicia sozinho, pedindo Face ID de novo. Então só recarrega
   // quando isso não custa nada — se ela ainda não destravou o cofre, ou se foi
   // ela mesma quem pediu a atualização. Caso contrário, a faixa espera.
+  //
+  // "Ainda não destravou" não é o mesmo que "não está fazendo nada". Quem está
+  // com a senha meio digitada, ou esperando o Face ID responder, está no meio
+  // de alguma coisa — e recarregar ali apaga o campo e cancela o prompt. Pior:
+  // a derivação da chave leva perto de um segundo, e o reload no meio dela
+  // devolve a pessoa para a tela de senha sem explicar por quê. Era isso que
+  // acontecia sempre que uma versão nova chegava junto com a abertura do app.
+  //
+  // Se ela já começou, a versão nova espera na faixa. Não se perde nada: a
+  // troca do cache é atômica e a próxima abertura já vem inteira na nova.
   let recarregando = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!jaTinhaControlador || recarregando) return;
-    if (!app.doc || app.pediuAtualizar) {
+    if ((!app.doc && !app.mexendoNoCofre) || app.pediuAtualizar) {
       recarregando = true;
       location.reload();
       return;
