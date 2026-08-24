@@ -2418,8 +2418,42 @@ async function salvarDireto(lido, { silencioso = false } = {}) {
  * e solta já registra sozinho. Só não registra quando a parada não foi um
  * "terminei de falar" de verdade (deu erro, ou estourou o tempo limite).
  */
+/**
+ * Por que o microfone não gravou.
+ *
+ * "Não consegui ouvir" não ajuda ninguém: a pessoa toca de novo, falha de
+ * novo, e conclui que o recurso é quebrado. Quase sempre a causa é uma só e o
+ * app consegue saber qual — abrir o arquivo direto do disco (file://) não é
+ * contexto seguro, e nenhum navegador entrega microfone assim.
+ */
+function porQueNaoOuviu(codigo) {
+  if (!janelaSegura()) {
+    return 'Aberto como arquivo local, o navegador não libera o microfone. Abra pelo endereço do app (https).';
+  }
+  if (codigo === 'not-allowed' || codigo === 'service-not-allowed') {
+    return 'A permissão de microfone está negada para este site. Libere nas configurações e tente de novo.';
+  }
+  if (codigo === 'no-speech') return 'Não ouvi nada. Fale mais perto, ou digite a frase.';
+  if (codigo === 'network') return 'O reconhecimento de voz precisa de internet. Digite a frase.';
+  if (codigo === 'audio-capture') return 'Não achei um microfone neste aparelho. Digite a frase.';
+  return 'Não consegui ouvir. Digite a frase.';
+}
+
+/**
+ * Contexto seguro: https, ou localhost.
+ *
+ * `file://` não é, e é o caso mais comum de quem está testando o app abrindo
+ * o index.html no navegador. Ali microfone, service worker e notificação são
+ * todos bloqueados — e nenhum deles avisa por quê.
+ */
+const janelaSegura = () =>
+  typeof window !== 'undefined'
+  && (window.isSecureContext === true
+    || ['localhost', '127.0.0.1'].includes(window.location?.hostname));
+
 function pedirFrase() {
   const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const seguro = janelaSegura();
 
   return sheet(
     `<h4>Fala com o Zé</h4>
@@ -2429,10 +2463,16 @@ function pedirFrase() {
        <label for="fr-nl">O que aconteceu</label>
        <textarea id="fr-nl" rows="2" placeholder="gastei 85 no mercado ontem"></textarea>
      </div>
-     ${Reconhecimento ? `
+     ${Reconhecimento && seguro ? `
        <button type="button" class="mic3d" data-mic="1" aria-label="Segure para falar">${icon('microfone')}</button>
        <p class="mic-legenda" data-legenda>Segure para falar, solte para registrar</p>`
-      : `<p class="sub">Para ditar no iPhone: toque no microfone do próprio teclado. Este navegador não dá ao app acesso ao reconhecimento de voz.</p>`}
+      : !seguro
+        // Botão que não pode funcionar não deve aparecer. Mostrar o microfone
+        // e falhar no toque é pior que não mostrar: a pessoa culpa o app.
+        ? `<p class="sub">O microfone não funciona com o app aberto como arquivo local —
+             nenhum navegador libera áudio assim. Pelo endereço do app (https) ele volta.
+             Enquanto isso, dá para ditar pelo microfone do próprio teclado.</p>`
+        : `<p class="sub">Para ditar no iPhone: toque no microfone do próprio teclado. Este navegador não dá ao app acesso ao reconhecimento de voz.</p>`}
      <div class="btns"><button class="btn primary" data-ok="1">Registrar</button>
        <button class="btn ghost" data-x="1">Cancelar</button></div>`,
     {
@@ -2476,7 +2516,7 @@ function pedirFrase() {
           }, 15000);
 
           rec.onresult = (e) => { campo.value = e.results[0][0].transcript; };
-          rec.onerror = () => { motivoParada = 'erro'; toast('Não consegui ouvir. Digite a frase.'); };
+          rec.onerror = (e) => { motivoParada = 'erro'; toast(porQueNaoOuviu(e?.error)); };
           rec.onend = encerrar;
 
           try {

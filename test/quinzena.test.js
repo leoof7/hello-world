@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diasDoRecorrente, mensalDoRecorrente, buildEvents } from '../src/core/projection.js';
+import { diasDoRecorrente, mensalDoRecorrente, buildEvents, lancamentosDeFixos } from '../src/core/projection.js';
 import { brlShort } from '../src/core/money.js';
 import { openEnvelope } from '../src/data/backup.js';
 import { derive } from '../src/ui/state.js';
@@ -117,4 +117,61 @@ test('JSON válido que não é backup também é recusado com nome', () => {
 test('envelope de versão futura avisa para atualizar o app', () => {
   const futuro = JSON.stringify({ magic: 'zero-backup', format: 999, salt: 'x', payload: 'y' });
   assert.throws(() => openEnvelope(futuro), /versão mais nova/);
+});
+
+// -------------------------------- os fixos entram nas telas de gasto
+//
+// Aluguel, luz e internet moram em `recurring` e nunca viraram transação. A
+// projeção sempre soube deles; as telas de gasto, não — e por isso "fixo
+// contra variável" dizia 0% fixo com R$ 1.170 de fixo cadastrado, a tendência
+// mensal mostrava só compras avulsas, e o "para onde foi" perdia a maior
+// fatia do mês. Três telas discordando do resto do app sobre o mesmo dinheiro.
+
+test('o gasto fixo do mês vira lançamento para as telas de gasto', async () => {
+  const { lancamentosDeFixos } = await import('../src/core/projection.js');
+  const fixos = [
+    { id: 'a', label: 'Aluguel', kind: 'expense', amountCents: -120000, dayOfMonth: 10, categoryId: 'moradia' },
+    { id: 'l', label: 'Luz', kind: 'expense', amountCents: -18000, dayOfMonth: 10, categoryId: 'contas' },
+  ];
+  const r = lancamentosDeFixos(fixos, '2026-07', '2026-08-21');
+  assert.equal(r.length, 2);
+  assert.equal(r.reduce((s, t) => s + Math.abs(t.amountCents), 0), 138000);
+  assert.ok(r.every((t) => t.derivado), 'marcados como derivados, para não virarem lançamento de verdade');
+});
+
+test('no mês corrente só entra o que já passou', () => {
+  // dia 21: o fixo do dia 10 já saiu, o do dia 28 ainda não.
+  const fixos = [
+    { id: 'a', label: 'Aluguel', kind: 'expense', amountCents: -120000, dayOfMonth: 10, categoryId: 'moradia' },
+    { id: 'f', label: 'Faxina', kind: 'expense', amountCents: -20000, dayOfMonth: 28, categoryId: 'contas' },
+  ];
+  const r = lancamentosDeFixos(fixos, '2026-08', '2026-08-21');
+  assert.equal(r.length, 1, 'contar o do dia 28 faria o mês nascer quase todo gasto');
+  assert.equal(r[0].description, 'Aluguel');
+});
+
+// A regra que decide entre contar duas vezes e não contar.
+test('se a pessoa lança gastos da categoria, o fixo dela não é somado de novo', () => {
+  const fixos = [{ id: 'a', label: 'Aluguel', kind: 'expense', amountCents: -120000, dayOfMonth: 10, categoryId: 'moradia' }];
+  const lancados = [{ id: 't', date: '2026-07-10', amountCents: -120000, categoryId: 'moradia' }];
+  assert.deepEqual(lancamentosDeFixos(fixos, '2026-07', '2026-08-21', lancados), [],
+    'quem registra o aluguel não pode ver dois aluguéis no mês');
+});
+
+test('mas o fixo de uma categoria que ela não lança continua entrando', () => {
+  const fixos = [
+    { id: 'a', label: 'Aluguel', kind: 'expense', amountCents: -120000, dayOfMonth: 10, categoryId: 'moradia' },
+    { id: 'l', label: 'Luz', kind: 'expense', amountCents: -18000, dayOfMonth: 10, categoryId: 'contas' },
+  ];
+  const lancados = [{ id: 't', date: '2026-07-10', amountCents: -120000, categoryId: 'moradia' }];
+  const r = lancamentosDeFixos(fixos, '2026-07', '2026-08-21', lancados);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].description, 'Luz', 'moradia foi lançada; contas não');
+});
+
+test('renda fixa não vira gasto', () => {
+  const r = lancamentosDeFixos(
+    [{ id: 's', label: 'Salário', kind: 'income', amountCents: 470000, dayOfMonth: 5 }],
+    '2026-07', '2026-08-21');
+  assert.deepEqual(r, []);
 });

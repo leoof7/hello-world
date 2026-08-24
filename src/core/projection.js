@@ -33,6 +33,75 @@ export function diasDoRecorrente(r) {
 export const mensalDoRecorrente = (r) => Math.abs(r?.amountCents || 0) * diasDoRecorrente(r).length;
 
 /**
+ * Os gastos fixos de um mês, na forma de lançamento.
+ *
+ * Existe porque as telas de GASTO liam só `transactions`, e aluguel, luz e
+ * internet moram em `recurring`. O resultado é que a projeção conhecia esses
+ * R$ 1.170 por mês e a Saúde não: "fixo contra variável" dizia 0% fixo, a
+ * tendência mensal mostrava só as compras avulsas, e o "para onde foi" perdia
+ * a maior fatia do mês. Três telas discordando do resto do app sobre o mesmo
+ * dinheiro.
+ *
+ * No mês corrente entram só as ocorrências cujo dia já passou. Contar o
+ * aluguel do dia 10 no dia 3 faria o mês nascer quase todo gasto — e a pessoa
+ * abriria o app no começo do mês achando que já torrou tudo.
+ */
+export function lancamentosDeFixos(recurring = [], mesKey, todayISO, jaLancados = []) {
+  const saida = [];
+  const [ano, mes] = String(mesKey).split('-').map(Number);
+  const mesCorrente = mesKey === String(todayISO).slice(0, 7);
+
+  // Em que categorias a pessoa JÁ lançou gasto neste mês.
+  //
+  // É a regra que decide entre contar duas vezes e não contar: quem tem o
+  // aluguel como fixo e também registra o pagamento veria dois aluguéis no
+  // mês, e um app que conta o mesmo dinheiro duas vezes é pior que um que
+  // não conta.
+  //
+  // O critério é a CATEGORIA, não o valor. Comparar valor é frágil — o
+  // aluguel sobe, a luz varia todo mês — e erra dos dois lados. Categoria
+  // responde a pergunta certa: se você lança gastos de Moradia, o app confia
+  // no que você lançou; se não lança nada de Moradia, ele usa o fixo que você
+  // cadastrou. Um dos dois sempre vale, nunca os dois.
+  const categoriasLancadas = new Set(
+    jaLancados
+      .filter((t) => t.amountCents < 0 && !t.derivado
+        && (t.competence || String(t.date).slice(0, 7)) === mesKey)
+      .map((t) => t.categoryId || null)
+  );
+
+  for (const r of recurring) {
+    if (r.kind !== 'expense') continue;
+    if (categoriasLancadas.has(r.categoryId || null)) continue;
+    // Fixo pago no vale não sai da conta, mas É gasto: aparece na categoria
+    // dele como qualquer compra. Quem decide o que entra no caixa é a
+    // projeção; aqui o assunto é "quanto eu gastei".
+    for (const dia of diasDoRecorrente(r)) {
+      const data = clampedDay(ano, mes, dia);
+      if (mesCorrente && data > todayISO) continue;
+      saida.push({
+        id: `fixo:${r.id}:${data}`,
+        date: data,
+        competence: mesKey,
+        amountCents: -Math.abs(r.amountCents),
+        description: r.label,
+        categoryId: r.categoryId || null,
+        cardId: r.cardId || null,
+        // Marca que é derivado. Nada que edita, revisa ou categoriza pode
+        // topar com isto achando que é um lançamento de verdade.
+        derivado: true,
+      });
+    }
+  }
+  return saida;
+}
+
+/** Os fixos de vários meses de uma vez — para a tendência e as médias. */
+export function fixosDeVariosMeses(recurring = [], meses = [], todayISO, jaLancados = []) {
+  return meses.flatMap((m) => lancamentosDeFixos(recurring, m, todayISO, jaLancados));
+}
+
+/**
  * Gera os eventos de caixa entre duas datas.
  *
  * recurring: [{ id, label, dayOfMonth, amountCents, kind:'income'|'expense',

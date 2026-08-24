@@ -1241,8 +1241,55 @@ function calendarioMes(v) {
 
 // ============================================================ DÍVIDAS
 
+/**
+ * As dívidas pausadas, sempre visíveis.
+ *
+ * Antes moravam numa dobra fechada no fim da tela, e quem pausou não achava
+ * mais para religar. Pausar tira a dívida das CONTAS — do total, do juro por
+ * dia, do mínimo, da ordem de pagar e da projeção — nunca da tela. Some do
+ * cálculo, não da vista.
+ */
+function listaDePausadas(v) {
+  if (!v.dividasDesligadas.length) return '';
+  const total = sum(v.dividasDesligadas.map((d) => Math.abs(d.balanceCents)));
+  return `
+  <div class="sec">
+    <div class="sh"><h3>Pausadas</h3><a>${m(total, brlShort)} fora das contas</a></div>
+    <p class="empty" style="text-align:left;padding:0 4px 10px;font-size:11.5px">
+      Continuam cadastradas e não entram em nada: nem no total, nem no juro por dia,
+      nem no mínimo do mês, nem na projeção. É o lugar da dívida em negociação ou
+      que você contesta. Toque para voltar a contar.
+    </p>
+    <div class="list">${v.dividasDesligadas.map((d) => `
+      <button class="row" data-act="alternar-divida" data-id="${esc(d.id)}">
+        <div class="ic a">${icon('relogio')}</div>
+        <div class="bd"><div class="t">${esc(d.name)}</div>
+          <div class="s">${pilulasDaLinha(['pausada', percent(d.monthlyRate || 0, 1) + '/mês'])}</div></div>
+        <div class="rt"><div class="amt num">${m(Math.abs(d.balanceCents))}</div>
+          <div class="dt">voltar a contar</div></div>
+      </button>`).join('')}</div>
+  </div>`;
+}
+
 function dividas(app) {
   const v = app.view;
+
+  // Pausar a única dívida fazia a tela cair no estado "nenhuma cadastrada" e
+  // a dívida sumia de vez — quem pausou não achava mais para religar. Pausada
+  // ela sai das CONTAS, nunca da tela.
+  if (!v.dividas.length && v.dividasDesligadas.length) {
+    return `${header(app, { voltar: 'tudo' })}
+      <div class="sec" style="margin-top:0">
+        <div class="say">
+          <div class="k eb" style="color:var(--amber)">Tudo pausado</div>
+          <div class="q ser">Suas ${v.dividasDesligadas.length === 1 ? 'dívida está pausada' : `${v.dividasDesligadas.length} dívidas estão pausadas`}.</div>
+          <div class="p">Elas continuam cadastradas e não entram em conta nenhuma — nem no total,
+            nem no juro por dia, nem na projeção. Toque para voltar a contar.</div>
+        </div>
+      </div>
+      ${listaDePausadas(v)}`;
+  }
+
   if (!v.dividas.length) {
     return `${header(app, { voltar: 'tudo' })}
       <div class="empty" style="margin-top:40px">
@@ -1332,25 +1379,7 @@ function dividas(app) {
 
   ${plano?.done ? balaoDoPlano(v) : ''}
 
-  ${v.dividasDesligadas.length ? `
-  <details class="sec dobra">
-    <summary>
-      <span>Pausadas</span>
-      <span class="dobra-nota">${v.dividasDesligadas.length} · ${m(sum(v.dividasDesligadas.map((d) => Math.abs(d.balanceCents))), brlShort)} fora da conta</span>
-    </summary>
-    <p class="empty" style="text-align:left;padding:10px 4px;font-size:11.5px">
-      Continuam cadastradas e não entram em nada: nem no total, nem no juro por dia,
-      nem no mínimo do mês, nem na projeção. É o lugar da dívida que está em negociação
-      ou que você contesta.
-    </p>
-    <div class="list">${v.dividasDesligadas.map((d) => `
-      <button class="row" data-act="alternar-divida" data-id="${esc(d.id)}">
-        <div class="ic">${icon('relogio')}</div>
-        <div class="bd"><div class="t">${esc(d.name)}</div>
-          <div class="s">${pilulasDaLinha(['pausada', percent(d.monthlyRate || 0, 1) + '/mês'])}</div></div>
-        <div class="rt"><div class="amt num">${m(Math.abs(d.balanceCents))}</div><div class="dt">voltar a contar</div></div>
-      </button>`).join('')}</div>
-  </details>` : ''}
+  ${listaDePausadas(v)}
 
   ${ganho && ganho.savedInterestCents > 0 ? `
   <div class="sec"><div class="say">

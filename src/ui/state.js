@@ -9,7 +9,7 @@ import { today, monthKey, addMonthKey, addDays } from '../core/dates.js';
 import { cycleFor, openCycle, nextCycle, dueDateOf } from '../core/statements.js';
 import { geraFatura, ehCredito, ehBeneficio, valesDe, previsaoDoBeneficio, debitosFuturos } from '../core/cards.js';
 import { byPurchase, wall, committed } from '../core/installments.js';
-import { buildEvents, daily, monthly, freeToSpend, nextIncomeDate, mensalDoRecorrente } from '../core/projection.js';
+import { buildEvents, daily, monthly, freeToSpend, nextIncomeDate, mensalDoRecorrente, fixosDeVariosMeses } from '../core/projection.js';
 import { totalBalance, totalDailyInterest, totalMonthlyInterest, payoffPlan, minimumOnlyPlan, minimumsToday, minimumOf, order, ativa, somenteAtivas } from '../core/debts.js';
 import { monthStatus, overall, fixedVsVariable, worst } from '../core/budget.js';
 import { scan } from '../core/leaks.js';
@@ -178,7 +178,39 @@ export function derive(doc, todayISO = today()) {
 
   // ---- orçamento ----
   const comTeto = categorias.map((c) => ({ ...c, limitCents: doc.budgets?.[c.id] || 0 }));
-  const orcamento = monthStatus(comTeto, doc.transactions, todayISO);
+  /**
+   * O que as telas de GASTO enxergam: lançamentos mais os fixos do período.
+   *
+   * Aluguel, luz e internet moram em `recurring` e nunca viraram transação.
+   * A projeção sempre soube deles; as telas de gasto, não — e por isso "fixo
+   * contra variável" dizia 0% fixo, a tendência mensal mostrava só compras
+   * avulsas e o "para onde foi" perdia a maior fatia do mês.
+   *
+   * Isto NÃO vai para a revisão nem para o detector de vazamento: lançamento
+   * derivado não se categoriza, e um fixo repetido todo mês seria "detectado"
+   * como assinatura duplicada por um scanner que procura exatamente isso.
+   */
+  // O fixo só entra a partir do mês em que o app viu movimento pela primeira
+  // vez. Sem esse corte, cadastrar o aluguel hoje faria a tendência afirmar
+  // que a pessoa pagou aluguel em março — um mês em que o app não existia.
+  // Projetar gasto para trás é inventar histórico, e histórico inventado é o
+  // que faz alguém desconfiar de todo o resto.
+  const primeiroMesReal = doc.transactions.length
+    ? doc.transactions.reduce((menor, t) => {
+      const k = t.competence || monthKey(t.date);
+      return k < menor ? k : menor;
+    }, mes)
+    : mes;
+
+  const mesesDoHistorico = Array.from({ length: 6 }, (_, i) => addMonthKey(mes, i - 5))
+    .filter((k) => k >= primeiroMesReal);
+
+  const gastosDoMes = [
+    ...doc.transactions,
+    ...fixosDeVariosMeses(doc.recurring || [], mesesDoHistorico, todayISO, doc.transactions),
+  ];
+
+  const orcamento = monthStatus(comTeto, gastosDoMes, todayISO);
   // Teto é pra gasto que varia. Categoria fixa (Moradia, Contas da casa...) tem
   // valor e dia certos vindos de Gastos fixos — vira lista informativa em vez
   // de barra de progresso presa em "R$ 0 gasto" pra sempre. O resumo geral
@@ -194,21 +226,21 @@ export function derive(doc, todayISO = today()) {
   const categoriasFixas = categorias
     .filter((c) => c.fixed && gastoFixoPorCategoria.has(c.id))
     .map((c) => ({ ...c, fixedCents: gastoFixoPorCategoria.get(c.id) }));
-  const fixoVariavel = fixedVsVariable(doc.transactions, categorias, mes);
+  const fixoVariavel = fixedVsVariable(gastosDoMes, categorias, mes);
 
   // ---- histórico: tendência, não projeção ----
-  const historicoMensal = monthlySpend(doc.transactions, todayISO, { months: 6 });
-  const { dias: calendarioDias, primeiroDiaSemana } = dailyNet(doc.transactions, mes);
+  const historicoMensal = monthlySpend(gastosDoMes, todayISO, { months: 6 });
+  const { dias: calendarioDias, primeiroDiaSemana } = dailyNet(gastosDoMes, mes);
   const piorDiaMes = worstDay(calendarioDias);
 
   // ---- o que o app tem a dizer sem ser perguntado ----
-  const comparativo = versusMedia(doc.transactions, categorias, todayISO);
+  const comparativo = versusMedia(gastosDoMes, categorias, todayISO);
 
   // ---- vazamentos e diagnóstico ----
   const vazamentos = scan(doc.transactions, todayISO);
   const dispensados = new Set(doc.avisosDispensados || []);
   const saude = diagnose({
-    transactions: doc.transactions,
+    transactions: gastosDoMes,
     categories: categorias,
     accounts: doc.accounts,
     // O diagnóstico de saúde também só olha as ativas: juro sobre a renda e
@@ -221,6 +253,7 @@ export function derive(doc, todayISO = today()) {
     minimumCostManualCents: doc.profile?.minimumCostCents || 0,
     minimumCostFixedCents: fixosEssenciaisCents,
     bens: doc.assets || [],
+    cofrinhosCents: emCofrinhosCents,
   });
 
   // ---- fila de revisão ----

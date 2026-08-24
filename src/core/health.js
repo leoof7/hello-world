@@ -133,11 +133,16 @@ export function allocation(transactions, categories, monthKeyStr, savedCents = 0
  * conta o saldo negativo por lá, com juro e tudo — somar de novo aqui contaria
  * a mesma dívida duas vezes.
  */
-export function netWorth(accounts, debts, bens = []) {
+export function netWorth(accounts, debts, bens = [], cofrinhosCents = 0) {
   const contasComDivida = new Set(debts.filter((d) => d.accountId).map((d) => d.accountId));
   const contasCents = sum(accounts.filter((a) => a.balanceCents > 0).map((a) => a.balanceCents));
   const bensCents = sum(bens.map((b) => Math.max(0, b.valueCents || 0)));
-  const ativos = contasCents + bensCents;
+  // O cofrinho é dinheiro separado de verdade — não sai de conta nenhuma
+  // quando você deposita nele. Ficava de fora do patrimônio enquanto contava
+  // na reserva de emergência: dois números do mesmo app discordando sobre o
+  // mesmo dinheiro, e o patrimônio saindo menor do que a pessoa tem.
+  const guardadoCents = Math.max(0, cofrinhosCents);
+  const ativos = contasCents + bensCents + guardadoCents;
   const passivos = totalBalance(debts) + sum(
     accounts.filter((a) => a.balanceCents < 0 && !contasComDivida.has(a.id)).map((a) => Math.abs(a.balanceCents))
   );
@@ -155,7 +160,7 @@ export function netWorth(accounts, debts, bens = []) {
  * Monta o diagnóstico completo. Cada item carrega a explicação de como foi
  * calculado, porque indicador que não se explica não muda comportamento.
  */
-export function diagnose({ transactions, categories, accounts, debts, incomeCents, savedCents, todayISO, minimumCostManualCents = 0, minimumCostFixedCents = 0, bens = [] }) {
+export function diagnose({ transactions, categories, accounts, debts, incomeCents, savedCents, todayISO, minimumCostManualCents = 0, minimumCostFixedCents = 0, bens = [], cofrinhosCents = 0 }) {
   const mes = monthKey(todayISO);
   const custoMinimo = minimumCostOfLiving(transactions, categories, todayISO,
     { manualCents: minimumCostManualCents, fixedEssentialCents: minimumCostFixedCents });
@@ -174,7 +179,7 @@ export function diagnose({ transactions, categories, accounts, debts, incomeCent
     savings: poupanca,
     emergency: reserva,
     allocation: allocation(transactions, categories, mes, poupanca.savedCents),
-    netWorth: netWorth(accounts, debts, bens),
+    netWorth: netWorth(accounts, debts, bens, cofrinhosCents),
     monthlyInterestCents: jurosMes,
     interestRatio: incomeCents ? jurosMes / incomeCents : 0,
   };
