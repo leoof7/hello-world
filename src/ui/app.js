@@ -573,6 +573,49 @@ async function main() {
     const s = location.hash.replace('#', '');
     if (TELAS.includes(s) && s !== app.screen) { app.screen = s; render(app); }
   });
+
+  // Depois de desenhar, e nunca antes: um print compartilhado abre uma folha
+  // por cima do app, e folha sobre tela em branco assusta.
+  await receberCompartilhado();
+}
+
+/**
+ * Alguém compartilhou um print para o Zero.
+ *
+ * No Android o app aparece na folha de compartilhamento como qualquer outro:
+ * print → Compartilhar → Zero. O service worker guardou o arquivo antes de
+ * mandar o app abrir; aqui ele é recolhido e o fluxo de sempre assume.
+ *
+ * O cache é esvaziado logo depois. Sem isso, todo abrir do app relançaria o
+ * mesmo print — e duplicar gasto faz o app acusar um rombo que não existe.
+ */
+async function receberCompartilhado() {
+  if (!new URLSearchParams(location.search).has('compartilhado')) return;
+
+  // Limpa a URL antes de qualquer coisa: recarregar a página não pode
+  // repetir a operação, e o endereço não precisa carregar esse rastro.
+  history.replaceState(null, '', `./index.html${location.hash}`);
+
+  try {
+    const cache = await caches.open('zero-compartilhado');
+    const [imagem, texto] = await Promise.all([
+      cache.match('./recebido-imagem'),
+      cache.match('./recebido-texto'),
+    ]);
+    await Promise.all([
+      cache.delete('./recebido-imagem'),
+      cache.delete('./recebido-texto'),
+    ]);
+
+    const { lerPrintDeImagem, lancarTextoDePrint } = await import('./actions.js');
+
+    // Texto compartilhado já vem pronto — não precisa passar pelo OCR.
+    if (texto) {
+      const t = await texto.text();
+      if (t.trim()) { await lancarTextoDePrint(t, 'do texto compartilhado'); return; }
+    }
+    if (imagem) await lerPrintDeImagem(await imagem.blob());
+  } catch { /* compartilhamento estranho não pode derrubar a abertura do app */ }
 }
 
 // ------------------------------------------------------------- atualizações

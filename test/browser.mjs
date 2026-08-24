@@ -1249,7 +1249,83 @@ async function mostrarCard(page, seletor) {
   await ctx.close();
 }
 
+// --------------------------------------------------- lançar do texto copiado
+//
+// O caminho que o Atalho do iPhone usa: alguém (ou uma automação) copia o
+// texto das notificações, e tocar em "Print" já mostra a lista pronta. É o
+// único caminho de um toque só, então é o que mais precisa não quebrar.
+
+{
+  console.log('\nlançar do texto copiado');
+  const { ctx, page } = await novoAparelho('exemplo');
+  // Sem isto o Chromium recusa ler a área de transferência e o teste mediria
+  // a permissão negada em vez do recurso.
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(BASE).origin });
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+
+  const antes = await page.evaluate(async () =>
+    (await import('./src/ui/app.js')).app.doc.transactions.length);
+
+  await page.evaluate(async () => {
+    await navigator.clipboard.writeText([
+      '9:41',
+      'Nubank',
+      'Compra aprovada',
+      'R$ 45,90 em PADARIA CENTRAL',
+      'Compra aprovada no cartao final 4321',
+      'R$ 1.289,00 em MAGAZINE LUIZA',
+      'Pix recebido',
+      'Voce recebeu R$ 1.200,00 de EMPRESA XPTO',
+    ].join('\n'));
+  });
+
+  await page.evaluate(() => { location.hash = '#painel'; });
+  await page.waitForTimeout(400);
+  await page.click('[data-act="ler-print"]');
+  await page.waitForSelector('.sheet #frm, .sheet .list', { timeout: 15000 }).catch(() => null);
+  await page.waitForTimeout(600);
+
+  const folha = await page.evaluate(() => document.body.innerText);
+  ok('tocar em Print com texto copiado já mostra a confirmação',
+    /lançamentos encontrados|lançamento encontrado/i.test(folha), folha.slice(0, 120));
+  ok('e diz de onde os lançamentos vieram', /texto copiado/i.test(folha));
+
+  const marcados = await page.$$eval('.sheet input[data-i]', (els) => els.filter((e) => e.checked).length);
+  ok('o que o app entendeu bem já vem marcado', marcados >= 2, `${marcados} marcados`);
+
+  await page.click('.sheet [data-a="ok"]');
+  await page.waitForTimeout(900);
+
+  const depois = await page.evaluate(async () =>
+    (await import('./src/ui/app.js')).app.doc.transactions);
+  const novos = depois.length - antes;
+  ok('e confirmar lança de verdade', novos >= 2, `${novos} lançamentos novos`);
+
+  const pix = depois.find((t) => t.amountCents === 120000);
+  ok('o pix recebido entrou como entrada', !!pix, `entradas: ${depois.filter((t) => t.amountCents > 0).length}`);
+
+  // Duplicata: o mesmo texto de novo não pode entrar marcado outra vez.
+  await page.evaluate(() => { location.hash = '#painel'; });
+  await page.waitForTimeout(300);
+  await page.click('[data-act="ler-print"]');
+  await page.waitForTimeout(900);
+  const remarcados = await page.$$eval('.sheet input[data-i]', (els) => els.filter((e) => e.checked).length);
+  ok('colar o mesmo print de novo não remarca nada — duplicar gasto é pior que perder',
+    remarcados === 0, `${remarcados} vieram marcados`);
+  const aviso = await page.evaluate(() => document.body.innerText);
+  ok('e a folha avisa que já parecem lançados', /já lançado/i.test(aviso));
+
+  await page.click('.sheet [data-a="no"]');
+  await page.waitForTimeout(200);
+  ok('nenhum erro de console no caminho inteiro', erros.length === 0, erros.join(' | '));
+
+  await page.evaluate(async () => { await (await import('./src/data/db.js')).wipe(); });
+  await ctx.close();
+}
+
 await browser.close();
+
 
 
 console.log(falhas ? `\n${falhas} verificações falharam` : '\ntudo passou');

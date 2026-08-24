@@ -26,7 +26,7 @@ import * as csv from '../io/csv.js';
 import * as ofx from '../io/ofx.js';
 import { buildCalendar } from '../io/ics.js';
 import { statementsOf } from './state.js';
-import { esc, icon, toast, sheet, confirmar, entregar, colunaDia, pilulasDaLinha } from './dom.js';
+import { esc, icon, toast, sheet, confirmar, entregar, colunaDia, pilulasDaLinha, colar } from './dom.js';
 import { botaoColar, colarNoCampo } from './frase.js';
 
 export function wire() {
@@ -2221,7 +2221,66 @@ async function editarDivida(id) {
 // que passa despercebido: R$ 45,90 vira R$ 4,90 e o número continua plausível.
 // Por isso a última palavra é sempre de quem está olhando.
 
+/**
+ * O Print começa pela área de transferência.
+ *
+ * Parece detalhe e é o recurso inteiro. Com um Atalho do iPhone rodando às
+ * 22 h — buscar os prints do dia, extrair o texto, copiar — abrir o Zero e
+ * tocar em "Print" já mostra a lista pronta para confirmar. Um toque para o
+ * dia inteiro.
+ *
+ * A leitura da área de transferência só é permitida a partir de um toque, e é
+ * exatamente o que este caminho é: a pessoa tocou no botão. Silenciosamente,
+ * ao abrir o app, o navegador recusaria — por isso não existe detecção
+ * automática aqui, existe um botão que tenta o caminho bom primeiro.
+ *
+ * Sem nada copiado, cai na escolha de imagem, que é o caminho de quem não
+ * configurou atalho nenhum.
+ */
 async function lerPrint() {
+  if (await lancarTextoDePrint(await colar(), 'do texto copiado')) return;
+
+  // Nada de útil copiado. Em vez de reclamar, oferece o outro caminho — e
+  // conta que existe o atalho, porque quem não sabe que existe nunca procura.
+  const escolha = await sheet(
+    `<h4>Ler um print</h4>
+     <p class="sub">Escolha a imagem do print e o app lê aqui dentro. A imagem não sai do aparelho.</p>
+     <p class="sub" style="font-size:11.5px;opacity:.75">Dica: no iPhone dá para um Atalho extrair o texto dos
+       prints do dia e copiar sozinho. Aí é só tocar aqui e confirmar — veja em Tudo → Guia.</p>
+     <div class="btns">
+       <button class="btn primary" data-a="img">Escolher imagem</button>
+       <button class="btn ghost" data-a="no">Cancelar</button>
+     </div>`,
+    {
+      onMount: (card, fechar) => {
+        card.querySelector('[data-a="img"]').onclick = () => fechar('img');
+        card.querySelector('[data-a="no"]').onclick = () => fechar(null);
+      },
+    }
+  );
+  if (escolha !== 'img') return;
+
+  await lerPrintDeImagem();
+}
+
+/**
+ * Texto de notificação vira lançamentos, se houver o que virar.
+ *
+ * Devolve `true` quando achou alguma coisa e levou a pessoa até a confirmação.
+ * `false` quer dizer "não tinha nada aqui" — e quem chamou decide o que fazer,
+ * porque o silêncio significa coisas diferentes em cada porta de entrada: no
+ * botão, oferecer a imagem; no compartilhamento, tentar a imagem que veio junto.
+ */
+export async function lancarTextoDePrint(texto, origem = 'do texto') {
+  if (!String(texto || '').trim()) return false;
+  const achados = lancamentosDoPrint(texto, { cards: app.doc.cards, todayISO: app.todayISO });
+  if (!achados.length) return false;
+  await confirmarPrint(achados, origem);
+  return true;
+}
+
+/** Lê um print a partir de uma imagem, com o motor de OCR embarcado. */
+export async function lerPrintDeImagem(arquivoPronto = null) {
   const ocr = await import('../io/ocr.js');
 
   // Baixar 9 MB sem avisar, possivelmente no 4G da pessoa, seria falta de
@@ -2237,7 +2296,9 @@ async function lerPrint() {
     if (!segue) return;
   }
 
-  const imagem = await escolherImagem();
+  // Vindo do compartilhamento do Android a imagem já chega escolhida; pelo
+  // botão, é a bandeja de fotos que escolhe.
+  const imagem = arquivoPronto || await escolherImagem();
   if (!imagem) return;
 
   const texto = await comBarra(async (andar) => {
@@ -2270,7 +2331,7 @@ async function lerPrint() {
     return;
   }
 
-  await confirmarPrint(achados);
+  await confirmarPrint(achados, 'da imagem');
 }
 
 /** Roda algo demorado com uma barra de progresso na tela. */
@@ -2308,7 +2369,7 @@ async function comBarra(trabalho) {
  * revisa uma lista em vez de digitar quatro lançamentos, que é a diferença
  * entre usar e não usar.
  */
-async function confirmarPrint(achados) {
+async function confirmarPrint(achados, origem = 'do print') {
   const comDuplicata = achados.map((a) => ({
     ...a,
     duplicata: jaExiste(a, app.doc.transactions),
@@ -2334,7 +2395,8 @@ async function confirmarPrint(achados) {
 
   const escolhidos = await sheet(
     `<h4>${comDuplicata.length} ${comDuplicata.length === 1 ? 'lançamento encontrado' : 'lançamentos encontrados'}</h4>
-     <p class="sub">Desmarque o que não for. A data fica sendo hoje — dá para corrigir depois em cada um.</p>
+     <p class="sub">Lidos ${esc(origem)}. Desmarque o que não for — a data fica sendo hoje,
+       e dá para corrigir depois em cada um.</p>
      <div class="list" style="max-height:46vh;overflow:auto">${comDuplicata.map(linha).join('')}</div>
      <div class="btns">
        <button class="btn primary" data-a="ok">Lançar marcados</button>
@@ -2389,7 +2451,7 @@ async function confirmarPrint(achados) {
     }
   });
 
-  toast(`${escolhidos.length} ${escolhidos.length === 1 ? 'lançamento' : 'lançamentos'} do print. Confira a categoria em Revisão.`);
+  toast(`${escolhidos.length} ${escolhidos.length === 1 ? 'lançamento' : 'lançamentos'}. Confira a categoria em Revisão.`);
 }
 
 /** A saída de uma dívida merece mais que um toast — principalmente a última. */

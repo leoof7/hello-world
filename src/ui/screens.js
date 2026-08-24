@@ -2299,6 +2299,40 @@ function revisao(app) {
 
 // ============================================================ COMO USAR
 
+/**
+ * A receita do atalho, dentro do app.
+ *
+ * Mora aqui e não num documento no repositório porque quem precisa dela está
+ * com o telefone na mão, não com o GitHub aberto. É o passo que transforma o
+ * "Print" de um recurso que exige tirar, escolher e esperar num toque só.
+ */
+function automacaoDoPrint() {
+  const passo = (n, texto) => `<div class="gi"><span class="bx dot"></span>
+    <div><b>${n}</b><i>${texto}</i></div></div>`;
+
+  return `
+  <div class="sec">
+    <div class="sh"><h3>Lançar o dia inteiro com um toque</h3><a>iPhone</a></div>
+    <div class="panel" style="padding:16px 16px 10px">
+      <p class="sub" style="margin-bottom:12px">Um Atalho junta os prints do dia, extrai o texto e
+        deixa copiado. Aí é só abrir o Zero e tocar em <b>Print</b> — a lista já vem pronta.
+        O leitor da Apple é melhor que o daqui e não baixa nada.</p>
+      ${passo('Atalhos → + → "Lançar no Zero"', 'o nome vira o comando da Siri também')}
+      ${passo('Buscar Fotos', 'Álbum é Capturas de Tela · Data de Criação é hoje')}
+      ${passo('Extrair Texto da Imagem', 'entrada: as fotos do passo anterior')}
+      ${passo('Combinar Texto', 'separador: novas linhas')}
+      ${passo('Copiar para a Área de Transferência', 'é o que o botão Print vai ler')}
+      <p class="sub" style="margin:12px 0 6px"><b>Para rodar sozinho todo dia:</b>
+        aba Automação → Hora do Dia → 22:00 → <b>Executar Imediatamente</b>.
+        Sem essa última opção ele só manda um aviso pedindo para você tocar.</p>
+      <p class="sub" style="margin-bottom:4px"><b>Para rodar na hora:</b> Ajustes → Acessibilidade →
+        Toque → Toque nas Costas → Toque Duplo. Tirou o print, bateu duas vezes atrás do telefone.</p>
+      <p class="sub" style="opacity:.75">No Android não precisa de nada disso: com o app instalado,
+        é Compartilhar → Zero direto do print.</p>
+    </div>
+  </div>`;
+}
+
 function guia(app) {
   const g = app.view.guia;
   const pct = Math.round((g.feitos / g.total) * 100);
@@ -2326,6 +2360,8 @@ function guia(app) {
   <div class="btns" style="margin-top:14px">
     <button class="btn ghost" data-act="tour" style="width:100%">${icon('seta')} Fazer o tour guiado pelas abas</button>
   </div>
+
+  ${automacaoDoPrint()}
 
   ${bloco('Uma vez só', g.pendentes.length ? `${g.pendentes.length} pendentes` : 'completo',
     g.passos.map((p) => `

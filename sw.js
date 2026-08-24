@@ -22,8 +22,17 @@
 // O cofre vive no IndexedDB e o service worker nem o enxerga. Nada aqui toca
 // nos seus dados.
 
-const VERSAO = '9f455a45125f';
+const VERSAO = '239c7965d2be';
 const CACHE = `zero-${VERSAO}`;
+
+/**
+ * Cache do que foi compartilhado de fora, esperando o app abrir.
+ *
+ * Fica fora da limpeza do `activate` de propósito: a pessoa compartilha um
+ * print, o navegador abre o app, e se nesse meio-tempo uma versão nova
+ * assumir, o `activate` apagaria justamente o que ela acabou de mandar.
+ */
+const CACHE_COMPARTILHADO = 'zero-compartilhado';
 
 const ARQUIVOS = [
   './',
@@ -99,7 +108,9 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((chaves) => Promise.all(chaves.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((chaves) => Promise.all(chaves
+        .filter((k) => k !== CACHE && k !== CACHE_COMPARTILHADO)
+        .map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -113,8 +124,40 @@ async function guardar(req, resposta) {
   return resposta;
 }
 
+// Compartilhar um print direto para dentro do app.
+//
+// No Android o `share_target` do manifesto faz o Zero aparecer na folha de
+// compartilhamento como qualquer app instalado: print → Compartilhar → Zero.
+// O navegador entrega isso como um POST, e POST não tem onde morar num app
+// sem servidor — então o service worker intercepta, guarda o arquivo num
+// cache e manda o app abrir. Sem isto o POST bateria no GitHub Pages, que
+// responde 405 e mostra uma tela de erro no lugar do app.
 self.addEventListener('fetch', (e) => {
   const req = e.request;
+
+  if (req.method === 'POST' && new URL(req.url).pathname.endsWith('/compartilhado')) {
+    e.respondWith((async () => {
+      try {
+        const form = await req.formData();
+        const cache = await caches.open(CACHE_COMPARTILHADO);
+        const imagem = form.get('imagem');
+        const texto = form.get('texto') || form.get('titulo') || '';
+
+        if (imagem && imagem.size) {
+          await cache.put('./recebido-imagem', new Response(imagem, {
+            headers: { 'content-type': imagem.type || 'image/png' },
+          }));
+        }
+        if (texto) await cache.put('./recebido-texto', new Response(String(texto)));
+      } catch { /* compartilhamento estranho: abre o app mesmo assim */ }
+
+      // 303 para o navegador trocar o POST por um GET — sem isso, recarregar
+      // a página reenviaria o formulário.
+      return Response.redirect('./index.html?compartilhado=1', 303);
+    })());
+    return;
+  }
+
   if (req.method !== 'GET') return;
 
   // Cache primeiro, para tudo: é o que faz o app abrir instantaneamente e
